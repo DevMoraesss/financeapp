@@ -1,0 +1,39 @@
+# ---------- .NET ----------
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+artifacts/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+TestResults/
+coverage/
+*.coverage
+*.trx
+*.received.*
+
+# ---------- Node / frontend ----------
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+
+# ---------- Segredos e ambiente ----------
+# NUNCA comitar credenciais: connection string, chave de token, API key.
+.env
+.env.*
+!.env.example
+appsettings.Development.local.json
+appsettings.Production.json
+*.pfx
+*.key
+
+# ---------- Ferramentas / SO ----------
+.idea/
+.DS_Store
+Thumbs.db
+*.log
