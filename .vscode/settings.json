@@ -1,0 +1,17 @@
+{
+  "//": "Aponta o servidor de linguagem do C# para a solution certa. Sem isto, com varios projetos abertos no mesmo workspace, o editor as vezes carrega o projeto errado e marca em vermelho tipos que compilam sem problema.",
+  "dotnet.defaultSolution": "FinanceMove.sln",
+
+  "//formatacao": "Salvar aplica as regras do .editorconfig, iguais as do dotnet format.",
+  "editor.formatOnSave": true,
+  "[csharp]": {
+    "editor.defaultFormatter": "ms-dotnettools.csharp"
+  },
+
+  "files.exclude": {
+    "**/bin": true,
+    "**/obj": true
+  },
+
+  "files.eol": "\n"
+}

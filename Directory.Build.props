@@ -1,0 +1,29 @@
+<Project>
+
+  <!--
+    Configuração aplicada a TODOS os projetos da solution.
+    Mexer aqui vale mais que repetir propriedade em cada .csproj.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+
+    <!-- Nullable reference types: o compilador avisa sobre possível NullReferenceException. -->
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!--
+      Aviso de nullable vira ERRO de compilação. É rígido de propósito:
+      num app financeiro, "objeto nulo aqui" costuma virar saldo errado ali.
+      Os demais avisos continuam avisos (para não travar você por estilo).
+    -->
+    <WarningsAsErrors>nullable</WarningsAsErrors>
+
+    <!-- Roda as regras do .editorconfig durante o build, não só no dotnet format. -->
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <AnalysisMode>Recommended</AnalysisMode>
+
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+</Project>

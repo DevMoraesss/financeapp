@@ -1,0 +1,32 @@
+# Banco de desenvolvimento do FinanceMove.
+# Sobe só o Postgres: a API roda na sua máquina (dotnet run) para você ter hot reload e debugger.
+# Uso: docker compose up -d |  docker compose down |  docker compose down -v (apaga os dados)
+
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: financemove-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: financemove
+      POSTGRES_PASSWORD: financemove_dev
+      POSTGRES_DB: financemove
+      # Faz o banco falar o mesmo fuso da aplicação (SPEC secao 9.4).
+      TZ: America/Sao_Paulo
+      PGTZ: America/Sao_Paulo
+    ports:
+      # Porta 5435 no host: 5432, 5433 e 5434 já estão ocupadas por outros containers
+      # nesta máquina. Se der conflito, exporte FINANCEMOVE_DB_PORT com uma porta livre
+      # (e ajuste a connection string em src/Api/appsettings.Development.json).
+      - "${FINANCEMOVE_DB_PORT:-5435}:5432"
+    volumes:
+      - financemove-db-data:/var/lib/postgresql/data
+    healthcheck:
+      # O "depends_on: condition: service_healthy" de outros serviços depende disto.
+      test: ["CMD-SHELL", "pg_isready -U financemove -d financemove"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  financemove-db-data:

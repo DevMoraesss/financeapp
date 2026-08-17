@@ -1,0 +1,57 @@
+@import 'tailwindcss';
+
+/*
+  Tema do FinanceMove - portado do protótipo Lovable (dark).
+  Tailwind v4 é CSS-first: os tokens abaixo viram classes utilitárias
+  (ex.: --color-surface -> bg-surface, text-surface, border-surface).
+*/
+@theme {
+  /* Superfícies */
+  --color-canvas: #0a0c0e; /* fundo da página */
+  --color-sidebar: #0e1113; /* barra lateral */
+  --color-surface: #14181b; /* cards */
+  --color-surface-hover: #191e22;
+  --color-line: #232a2f; /* bordas */
+
+  /* Texto */
+  --color-ink: #f1f5f7; /* principal */
+  --color-ink-muted: #8b979f; /* secundário */
+  --color-ink-faint: #5b666d; /* legendas */
+
+  /* Marca e semântica */
+  --color-brand: #2ee59d; /* verde do app: saldo, ações, item ativo */
+  --color-brand-ink: #05231a; /* texto sobre o verde */
+  --color-income: #2ee59d;
+  --color-expense: #fb5d6d;
+  --color-warning: #f5b942;
+
+  /* Paleta de categorias (donut e listas) */
+  --color-cat-1: #38bdf8;
+  --color-cat-2: #a78bfa;
+  --color-cat-3: #f59e0b;
+  --color-cat-4: #f472b6;
+  --color-cat-5: #22d3ee;
+  --color-cat-6: #34d399;
+
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  --radius-card: 0.875rem;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Números de dinheiro alinham melhor com dígitos de largura fixa. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}

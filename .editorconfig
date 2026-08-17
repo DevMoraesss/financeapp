@@ -1,0 +1,97 @@
+root = true
+
+# ---------------------------------------------------------------------------
+# Formatador e linter do projeto.
+# `dotnet format` lê este arquivo; o build também (EnforceCodeStyleInBuild).
+# ---------------------------------------------------------------------------
+
+[*]
+charset = utf-8
+# LF mesmo no Windows: o CI roda em Linux e o Docker também. Um repositório com finais de
+# linha mistos gera diffs falsos onde ninguém mudou nada. O .gitattributes reforça isso.
+end_of_line = lf
+indent_style = space
+indent_size = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{md,markdown}]
+trim_trailing_whitespace = false
+
+[*.{yml,yaml,json,jsonc}]
+indent_size = 2
+
+[*.cs]
+indent_size = 4
+max_line_length = 120
+
+# --- Organização de usings ---
+dotnet_sort_system_directives_first = true
+dotnet_separate_import_directive_groups = false
+csharp_using_directive_placement = outside_namespace:warning
+
+# --- Preferências modernas de C# (viram sugestão do editor) ---
+csharp_style_namespace_declarations = file_scoped:warning
+csharp_style_var_for_built_in_types = true:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_expression_bodied_methods = when_on_single_line:suggestion
+csharp_style_prefer_primary_constructors = true:suggestion
+csharp_prefer_braces = true:warning
+csharp_style_prefer_pattern_matching = true:suggestion
+dotnet_style_prefer_is_null_check_over_reference_equality_method = true:warning
+dotnet_style_readonly_field = true:warning
+dotnet_style_require_accessibility_modifiers = for_non_interface_members:warning
+
+# --- Nomenclatura ---
+dotnet_naming_rule.interfaces_start_with_i.severity = warning
+dotnet_naming_rule.interfaces_start_with_i.symbols = interface_symbol
+dotnet_naming_rule.interfaces_start_with_i.style = prefix_i_style
+dotnet_naming_symbols.interface_symbol.applicable_kinds = interface
+dotnet_naming_style.prefix_i_style.required_prefix = I
+dotnet_naming_style.prefix_i_style.capitalization = pascal_case
+
+dotnet_naming_rule.constants_are_pascal_case.severity = warning
+dotnet_naming_rule.constants_are_pascal_case.symbols = constant_symbol
+dotnet_naming_rule.constants_are_pascal_case.style = pascal_case_style
+dotnet_naming_symbols.constant_symbol.applicable_kinds = field
+dotnet_naming_symbols.constant_symbol.required_modifiers = const
+dotnet_naming_style.pascal_case_style.capitalization = pascal_case
+
+# --- Regras que NÃO se aplicam a este projeto (decisão consciente) ---
+
+# CA1716: reclama que o namespace "Shared" colide com palavra reservada do Visual Basic.
+# Não vamos consumir esta biblioteca de VB.
+dotnet_diagnostic.CA1716.severity = none
+
+# CA1062: validação de argumento nulo em métodos públicos - o nullable reference types
+# (ligado como erro no Directory.Build.props) já cobre isso de forma mais forte.
+dotnet_diagnostic.CA1062.severity = none
+
+# CA1848 e CA1873: exigem delegates LoggerMessage pré-compilados em vez de logger.LogX(...).
+# Fazem diferença em caminho quente com milhões de chamadas por segundo, que não é o caso de um
+# app com dezenas de usuários. A legibilidade do log interpolado vale mais aqui.
+dotnet_diagnostic.CA1848.severity = none
+dotnet_diagnostic.CA1873.severity = none
+
+# CA1711: reclama de tipos terminados em "EventHandler". No nosso caso IEventHandler<T> é
+# exatamente o que o nome diz (um ouvinte de evento de domínio), e renomear só pioraria.
+dotnet_diagnostic.CA1711.severity = none
+
+# Migrations são geradas pelo EF Core: não vale a pena brigar com o estilo delas, e qualquer
+# ajuste manual some no próximo 'ef migrations add'. (A exceção é código escrito à mão dentro
+# da migration, como a FK entre schemas - esse a gente mantém e comenta.)
+[**/Migrations/*.cs]
+generated_code = true
+dotnet_diagnostic.IDE0161.severity = none
+dotnet_diagnostic.CA1861.severity = none
+
+[tests/**/*.cs]
+# CA1707: nomes de teste usam underscore de propósito (Metodo_Cenario_Resultado).
+# É a convenção que torna a saída do runner legível.
+dotnet_diagnostic.CA1707.severity = none
+
+# CA1711: xUnit exige que a classe de ICollectionFixture termine em "Collection".
+dotnet_diagnostic.CA1711.severity = none
+
+# CA1515: classes de teste precisam ser públicas para o runner enxergá-las.
+dotnet_diagnostic.CA1515.severity = none

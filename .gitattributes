@@ -1,0 +1,23 @@
+# Normaliza finais de linha: no repositório é sempre LF, independentemente do SO de quem commita.
+# Sem isto, o Windows converteria tudo para CRLF e o diff mostraria o arquivo inteiro como alterado.
+* text=auto eol=lf
+
+# Arquivos que precisam de CRLF para funcionar no Windows
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binários - nunca converter
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.dll binary
+*.exe binary
+
+# Arquivos gerados: some do diff por padrão no GitHub (ainda versionados)
+**/Migrations/*.Designer.cs linguist-generated=true
+**/Migrations/*ModelSnapshot.cs linguist-generated=true

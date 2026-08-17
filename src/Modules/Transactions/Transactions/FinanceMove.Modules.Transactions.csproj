@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Transactions.Contracts\FinanceMove.Modules.Transactions.Contracts.csproj" />
+    <ProjectReference Include="..\..\..\Shared\FinanceMove.Shared.csproj" />
+    <ProjectReference Include="..\..\Accounts\Accounts.Contracts\FinanceMove.Modules.Accounts.Contracts.csproj" />
+    <ProjectReference Include="..\..\Identity\Identity.Contracts\FinanceMove.Modules.Identity.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>
