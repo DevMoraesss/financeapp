@@ -151,7 +151,6 @@ financeapp/
 | \-- fluxos-usuario.md jornadas camada a camada
 +-- .claude/skills/          skills do projeto para o Claude Code (feature, modulo, deploy...)
 +-- Dockerfile               imagem da API (Railway)
-+-- railway.json             build e healthcheck no Railway
 +-- docker-compose.yml       Postgres de desenvolvimento
 +-- FinanceMove.sln
 +-- tools/                  scripts de apoio (smoke, limpeza de caracteres)

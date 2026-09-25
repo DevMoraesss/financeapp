@@ -54,6 +54,11 @@ entre elas. Os pontos onde as pessoas erram:
    Production).
 5. Esquecer `PORT=8080`: o Railway injeta uma porta propria, a API escuta nela, e o dominio gerado
    para 8080 responde 502.
+6. Esperar que o `railway.json` configure o servico: desde 28/08/2026 o Railway nao le mais config
+   as code em servico novo. Builder (via `RAILWAY_DOCKERFILE_PATH=Dockerfile`), healthcheck, watch
+   paths e Wait for CI sao feitos no painel (`docs/deploy.md`, secao 3).
+7. Deixar o dominio de exemplo no `web/vercel.json`: o `/api` responde 404 com
+   `x-railway-fallback: true` (e o Railway dizendo "Application not found").
 
 ## Depois de subir: verificacao
 
@@ -70,7 +75,8 @@ gasto de teste.
 
 | Sintoma | Onde olhar |
 |---|---|
-| `/api` 404, 502 ou DNS na Vercel | `web/vercel.json`: dominio do rewrite; o dominio do Railway existe e aponta para a porta 8080 |
+| `/api` 404 com `x-railway-fallback: true` | O dominio do rewrite no `web/vercel.json` nao existe no Railway (placeholder ou digitado errado) |
+| `/api` 502 ou DNS na Vercel | O dominio existe mas a API nao responde: porta do dominio diferente de 8080, ou deploy vermelho |
 | Login ok, F5 volta para o login | Usuario abrindo outro dominio (preview da Vercel, dominio do Railway). O cookie so vale no dominio de producao da Vercel |
 | Healthcheck vermelho no deploy | Logs do Railway: connection string, migration quebrada, `Jwt:SigningKey` curta (< 32) |
 | `fail: ... __ef_migrations_history` no primeiro deploy | Normal: o EF procura a tabela de historico num banco vazio |

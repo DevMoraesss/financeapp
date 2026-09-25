@@ -40,7 +40,9 @@ for ctx in $(grep -rhoE 'class [A-Za-z]+DbContext\b' src/Modules --include=*.cs 
 done
 [ -z "$missing" ] && ok "DatabaseMigrator migra todos os DbContext" || bad "DatabaseMigrator nao conhece:$missing (tabelas nao seriam criadas no deploy)"
 
-grep -q '"numReplicas": 1' railway.json && ok "railway.json com 1 replica" || warn "railway.json sem numReplicas 1 (migrations no startup e cache em memoria pressupoem 1)"
+# O Railway nao le mais arquivo de config em servico novo: replica, healthcheck e watch paths
+# ficam no painel (docs/deploy.md, secao 3). Aqui so da para lembrar.
+warn "confira no painel do Railway: 1 replica, healthcheck /health/ready, Dockerfile como builder"
 
 if git ls-files | grep -qE '(^|/)\.env$|appsettings\.Production\.json'; then bad "arquivo de segredo rastreado pelo git"; else ok "nenhum .env/appsettings.Production rastreado"; fi
 

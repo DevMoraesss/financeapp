@@ -66,7 +66,7 @@ servidor aceita o token recem-rotacionado por 30 s. Logout e troca de senha nao 
 Identity -> Accounts -> Transactions -> Budget, antes de atender. Migration quebrada = API nao sobe =
 healthcheck falha = Railway mantem a versao anterior.
 
-**Condicao:** uma replica (`numReplicas: 1` no `railway.json`). O cache em memoria do catch-up de
+**Condicao:** uma replica (configurada no painel do Railway). O cache em memoria do catch-up de
 recorrencia tambem assume isso. Com mais replicas, a migration vai para um passo de pre-deploy e o
 cache para o banco.
 
@@ -78,6 +78,10 @@ publico; cadastro impossivel sem convite; deploy que nao quebra o que esta no ar
 **Negativas (aceitas):** o dominio da API fica escrito no `vercel.json` (trocar o dominio exige
 commit); o rate limit por IP pode ser contornado por quem chamar o Railway direto falsificando
 `X-Forwarded-For` (o lockout por conta continua valendo); 2FA ainda nao existe.
+
+**Nota de 25/09/2026:** o Railway descontinuou o "config as code" (`railway.json`) para servicos
+criados a partir de 28/08/2026. Build pelo Dockerfile, healthcheck, watch paths e replica passaram a
+ser configurados no painel; o passo a passo esta no `docs/deploy.md`, secao 3.
 
 **Documentos afetados:** `docs/deploy.md` (roteiro), `docs/api.md` (convite, 403, 429, cookie),
 `CLAUDE.md`, `README.md`.

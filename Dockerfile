@@ -1,4 +1,4 @@
-# Imagem da API do FinanceMove, usada pelo Railway (railway.json).
+# Imagem da API do FinanceMove, usada pelo Railway (variavel RAILWAY_DOCKERFILE_PATH=Dockerfile).
 # Duas etapas: o SDK compila; a imagem final so tem o runtime, sem compilador nem shell.
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build

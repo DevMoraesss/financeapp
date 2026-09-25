@@ -133,7 +133,7 @@ web/
   src/components/         AppLayout, componentes de UI, formularios
   src/pages/              Login, Dashboard, Transactions, Statements, Budget, Settings
   vercel.json             proxy /api -> Railway, fallback da SPA, cabecalhos de seguranca (CSP)
-Dockerfile, railway.json  imagem e deploy da API no Railway
+Dockerfile                imagem da API no Railway (build, healthcheck e replica ficam no painel)
 .github/workflows/ci.yml  format + build + testes (com Postgres real) + lint + audit + ASCII
 .claude/skills/           skills do projeto (tabela acima)
 ```
@@ -250,7 +250,8 @@ O `Program.cs` lê a connection string antes do `builder.Build()`. Nos testes, p
 ### Uma réplica só
 
 As migrations rodam no startup (`Database:MigrateOnStartup`) e o catch-up de recorrência usa cache
-em memória. Os dois pressupõem uma instância (`numReplicas: 1` no `railway.json`).
+em memória. Os dois pressupõem uma instância (configurada no painel do Railway, que não lê mais
+`railway.json` em serviço novo desde 28/08/2026).
 
 ### Teste de integração usa Postgres de verdade
 

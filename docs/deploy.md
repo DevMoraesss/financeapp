@@ -46,9 +46,7 @@ Guarde os dois num gerenciador de senhas. Eles vao **somente** para as variaveis
 
 ## 3. Railway: API
 
-1. No mesmo projeto: **New -> GitHub Repo -> DevMoraesss/financeapp**. O `railway.json` da raiz
-   ja configura tudo: build pelo `Dockerfile`, healthcheck em `/health/ready`, 1 replica, e so
-   refaz o deploy quando algo em `src/` muda.
+1. No mesmo projeto: **New -> GitHub Repo -> DevMoraesss/financeapp**, branch `main`.
 2. Aba **Variables** do servico da API:
 
    | Variavel | Valor |
@@ -59,17 +57,31 @@ Guarde os dois num gerenciador de senhas. Eles vao **somente** para as variaveis
    | `Registration__MaxUsers` | `10` |
    | `Database__MigrateOnStartup` | `true` |
    | `PORT` | `8080` (fixa a porta; sem isso o Railway injeta outra e o dominio pode apontar para a errada) |
+   | `RAILWAY_DOCKERFILE_PATH` | `Dockerfile` (forca o build pelo nosso Dockerfile em vez do Railpack) |
 
    **Nao** defina `TEST_TODAY`, `ASPNETCORE_ENVIRONMENT` nem `Cors__AllowedOrigin`. O Dockerfile
    ja fixa `Production`, e em Production o `TEST_TODAY` e ignorado de qualquer forma.
-3. **Settings -> Networking -> Generate Domain**, porta **8080**. Edite o prefixo para algo seu
+3. **Settings** do servico da API. O Railway nao le mais `railway.json` em servico novo (desde
+   28/08/2026), entao estes ajustes sao feitos a mao:
+
+   | Onde | Valor |
+   |---|---|
+   | Build -> Builder | **Dockerfile**, se o menu oferecer (a variavel acima ja forca) |
+   | Build -> Watch Paths | `/src/**`, `/Dockerfile`, `/Directory.Build.props` (so o backend redeploya a API) |
+   | Deploy -> Healthcheck Path | `/health/ready` (migration quebrada nao derruba a versao no ar) |
+   | Source -> Wait for CI | ligado (so sobe o que passou nos testes do GitHub Actions) |
+   | Root Directory, Start Command | vazios |
+   | Serverless | desligado; 1 replica |
+
+   Depois clique em **Deploy**.
+4. **Settings -> Networking -> Generate Domain**, porta **8080**. Edite o prefixo para algo seu
    (ex.: `financemove-api-juan`). Anote o dominio completo: `https://<prefixo>.up.railway.app`.
-4. Faca o deploy e acompanhe **Deployments -> Logs**. Esperado no primeiro deploy:
+5. Acompanhe **Deployments -> Logs**. Esperado no primeiro deploy:
    - `Aplicando 1 migration(s) de IdentityModuleDbContext` e o mesmo para Accounts, Transactions
      e Budget, nessa ordem;
    - algumas linhas `fail: ... __ef_migrations_history`. **Sao normais**: e o EF procurando a
      tabela de historico que ainda nao existe num banco vazio. Nao aparecem nos deploys seguintes.
-5. Confira: `curl https://<prefixo>.up.railway.app/health/ready` deve responder
+6. Confira: `curl https://<prefixo>.up.railway.app/health/ready` deve responder
    `{"status":"Healthy",...}`.
 
 ## 4. Vercel: SPA
