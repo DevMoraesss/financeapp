@@ -1,7 +1,8 @@
 namespace FinanceMove.Modules.Identity.Contracts;
 
 /// <summary>Entrada do cadastro (docs/api.md secao 2).</summary>
-public sealed record RegisterRequest(string Name, string Email, string Password);
+/// <param name="InviteCode">Obrigatorio quando o servidor tem codigo de convite configurado.</param>
+public sealed record RegisterRequest(string Name, string Email, string Password, string? InviteCode = null);
 
 /// <summary>Entrada do login.</summary>
 public sealed record LoginRequest(string Email, string Password);
@@ -31,6 +32,10 @@ public interface IAuthService
     /// Se o e-mail ja existir, NAO lanca erro: devolve o mesmo resultado de sucesso sem criar
     /// nada. Responder diferente permitiria a qualquer um descobrir quem tem conta no app
     /// (user enumeration). Ver docs/api.md secao 2.1.
+    /// <para>
+    /// O codigo de convite e conferido ANTES de olhar o e-mail: sem o codigo certo a resposta e
+    /// sempre a mesma, entao quem nao foi convidado nao aprende nada sobre quem tem conta.
+    /// </para>
     /// </remarks>
     Task<UserDto> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default);
 

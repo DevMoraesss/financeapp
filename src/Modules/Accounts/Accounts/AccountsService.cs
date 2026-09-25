@@ -11,23 +11,8 @@ internal sealed class AccountsService(AccountsDbContext context, IClock clock) :
         CreateAccountRequest request,
         CancellationToken cancellationToken = default)
     {
-        var name = request.Name.Trim();
-
-        if (name.Length == 0)
-        {
-            throw DomainException.Unprocessable("O nome da conta e obrigatorio.", "missing-name");
-        }
-
-        // ILike do Postgres: comparacao sem diferenciar maiusculas, resolvida no banco. Usar
-        // ToLower() em C# dentro de uma query do EF depende da cultura da maquina.
-        var duplicated = await context.Accounts.AnyAsync(
-            account => account.UserId == userId && !account.Archived && EF.Functions.ILike(account.Name, name),
-            cancellationToken);
-
-        if (duplicated)
-        {
-            throw DomainException.Conflict($"Ja existe uma conta chamada \"{name}\".", "duplicate-account");
-        }
+        var name = RequireName(request.Name);
+        await EnsureUniqueNameAsync(userId, name, exceptId: null, cancellationToken);
 
         ValidateCycle(request.Type, request.ClosingDay, request.DueDay);
 
@@ -67,7 +52,10 @@ internal sealed class AccountsService(AccountsDbContext context, IClock clock) :
 
         ValidateCycle(account.Type, request.ClosingDay, request.DueDay);
 
-        account.Name = request.Name.Trim();
+        var name = RequireName(request.Name);
+        await EnsureUniqueNameAsync(userId, name, exceptId: accountId, cancellationToken);
+
+        account.Name = name;
         account.ClosingDay = account.Type == AccountType.CreditCard ? request.ClosingDay : null;
         account.DueDay = account.Type == AccountType.CreditCard ? request.DueDay : null;
         account.UpdatedAt = clock.UtcNow;
@@ -96,6 +84,40 @@ internal sealed class AccountsService(AccountsDbContext context, IClock clock) :
             .ExecuteDeleteAsync(cancellationToken);
 
         return affected > 0;
+    }
+
+    /// <summary>Nome obrigatorio e dentro do tamanho da coluna (varchar 60).</summary>
+    private static string RequireName(string? value)
+    {
+        var name = (value ?? string.Empty).Trim();
+
+        if (name.Length is 0 or > 60)
+        {
+            throw DomainException.Unprocessable("O nome da conta e obrigatorio e tem ate 60 caracteres.", "invalid-name");
+        }
+
+        return name;
+    }
+
+    /// <summary>
+    /// Mesmo nome so convive com conta arquivada. O indice unico do banco garante isso de
+    /// qualquer jeito; checar antes e para devolver 409 com mensagem, e nao um 500.
+    /// </summary>
+    private async Task EnsureUniqueNameAsync(Guid userId, string name, Guid? exceptId, CancellationToken cancellationToken)
+    {
+        // ILike do Postgres: comparacao sem diferenciar maiusculas, resolvida no banco. Usar
+        // ToLower() em C# dentro de uma query do EF depende da cultura da maquina.
+        var duplicated = await context.Accounts.AnyAsync(
+            account => account.UserId == userId
+                && account.Id != exceptId
+                && !account.Archived
+                && EF.Functions.ILike(account.Name, name),
+            cancellationToken);
+
+        if (duplicated)
+        {
+            throw DomainException.Conflict($"Ja existe uma conta chamada \"{name}\".", "duplicate-account");
+        }
     }
 
     /// <summary>

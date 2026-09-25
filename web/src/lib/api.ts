@@ -50,6 +50,11 @@ const BASE_URL = '/api/v1'
  */
 let accessToken: string | null = null
 let onSessionLost: (() => void) | null = null
+let refreshInFlight: Promise<LoginResponse | null> | null = null
+
+/** Mensagem para quando nem chegou resposta do servidor (sem internet, API fora do ar). */
+export const NETWORK_ERROR_MESSAGE =
+  'Nao foi possivel falar com o servidor. Confira sua conexao e tente de novo.'
 
 export function setAccessToken(token: string | null): void {
   accessToken = token
@@ -71,13 +76,15 @@ async function rawRequest(path: string, init: RequestInit): Promise<Response> {
   })
 }
 
-async function request<T>(path: string, init: RequestInit = {}, allowRetry = true): Promise<T> {
+/**
+ * Envia a requisicao e, se o access token tiver expirado (15 min), renova a sessao pelo cookie e
+ * tenta de novo uma unica vez antes de devolver o usuario para a tela de login.
+ */
+async function send(path: string, init: RequestInit = {}): Promise<Response> {
   let response = await rawRequest(path, init)
 
-  // Access token expirado (15 min): tenta uma renovacao silenciosa pelo cookie antes de
-  // devolver o usuario para a tela de login.
-  if (response.status === 401 && allowRetry && !path.startsWith('/auth/')) {
-    const renewed = await tryRefresh()
+  if (response.status === 401 && !path.startsWith('/auth/')) {
+    const renewed = await refreshSession()
 
     if (renewed) {
       response = await rawRequest(path, init)
@@ -86,35 +93,73 @@ async function request<T>(path: string, init: RequestInit = {}, allowRetry = tru
     }
   }
 
-  if (response.status === 204) return undefined as T
-
-  const isJson = response.headers.get('content-type')?.includes('application/json') ?? false
-  const body = isJson ? await response.json() : null
-
-  if (!response.ok) {
-    throw new ApiError(
-      body ?? { title: 'Nao foi possivel completar a operacao.', status: response.status },
-    )
-  }
-
-  return body as T
+  return response
 }
 
-async function tryRefresh(): Promise<boolean> {
-  try {
-    const response = await fetch(`${BASE_URL}/auth/refresh`, {
-      method: 'POST',
-      credentials: 'include',
-    })
+async function toApiError(response: Response): Promise<ApiError> {
+  const isJson = response.headers.get('content-type')?.includes('json') ?? false
+  const body = isJson ? ((await response.json()) as ProblemDetails) : null
+  return new ApiError(body ?? { title: 'Nao foi possivel completar a operacao.', status: response.status })
+}
 
-    if (!response.ok) return false
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await send(path, init)
 
-    const data = (await response.json()) as LoginResponse
-    accessToken = data.accessToken
-    return true
-  } catch {
-    return false
-  }
+  if (!response.ok) throw await toApiError(response)
+  if (response.status === 204) return undefined as T
+
+  const isJson = response.headers.get('content-type')?.includes('json') ?? false
+  return (isJson ? await response.json() : null) as T
+}
+
+/**
+ * Renova a sessao usando o cookie httpOnly de refresh.
+ *
+ * Chamadas simultaneas COMPARTILHAM a mesma ida ao servidor. Sem isso, uma tela que dispara tres
+ * requisicoes ao mesmo tempo recebia tres 401 depois de 15 minutos, fazia tres renovacoes com o
+ * mesmo cookie, e o servidor entendia a repeticao como roubo de token e derrubava a sessao.
+ * O servidor tambem tolera essa corrida (AuthService.ReuseGrace), mas o certo e nem provoca-la.
+ */
+export function refreshSession(): Promise<LoginResponse | null> {
+  refreshInFlight ??= (async () => {
+    try {
+      const response = await fetch(`${BASE_URL}/auth/refresh`, {
+        method: 'POST',
+        credentials: 'include',
+      })
+
+      if (!response.ok) return null
+
+      const data = (await response.json()) as LoginResponse
+      accessToken = data.accessToken
+      return data
+    } catch {
+      return null
+    } finally {
+      refreshInFlight = null
+    }
+  })()
+
+  return refreshInFlight
+}
+
+/**
+ * Baixa um arquivo de uma rota autenticada.
+ *
+ * Um link comum (<a href>) nao serve: o navegador nao anexa o access token, que vive so em
+ * memoria, e a API responderia 401. Aqui o arquivo vem pelo fetch autenticado e vira um link
+ * temporario local.
+ */
+async function download(path: string, filename: string): Promise<void> {
+  const response = await send(path, { method: 'GET' })
+  if (!response.ok) throw await toApiError(response)
+
+  const url = URL.createObjectURL(await response.blob())
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
 const api = {
@@ -262,10 +307,9 @@ export type TransactionWriteResult = {
 // ---------------------------------------------------------------------------
 
 export const auth = {
-  register: (name: string, email: string, password: string) =>
-    api.post<User>('/auth/register', { name, email, password }),
+  register: (name: string, email: string, password: string, inviteCode: string) =>
+    api.post<User>('/auth/register', { name, email, password, inviteCode: inviteCode.trim() || null }),
   login: (email: string, password: string) => api.post<LoginResponse>('/auth/login', { email, password }),
-  refresh: () => api.post<LoginResponse>('/auth/refresh'),
   logout: () => api.post<void>('/auth/logout'),
 }
 
@@ -273,6 +317,7 @@ export const endpoints = {
   me: () => api.get<User>('/me'),
   deleteAccount: (confirmation: string, password: string) =>
     api.del<void>('/me', { confirmation, password }),
+  exportCsv: () => download('/me/export', 'financemove-transacoes.csv'),
 
   dashboard: (month: string) => api.get<Dashboard>(`/dashboard?month=${month}`),
 

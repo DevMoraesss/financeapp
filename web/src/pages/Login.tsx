@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Wallet } from 'lucide-react'
-import { ApiError } from '../lib/api'
+import { ApiError, NETWORK_ERROR_MESSAGE } from '../lib/api'
 import { useAuth } from '../lib/AuthContext'
 import { Button, ErrorState } from '../components/ui'
 
@@ -10,6 +10,7 @@ export function Login() {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [inviteCode, setInviteCode] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -22,14 +23,10 @@ export function Login() {
       if (mode === 'login') {
         await login(email, password)
       } else {
-        await register(name, email, password)
+        await register(name, email, password, inviteCode)
       }
     } catch (caught) {
-      setError(
-        caught instanceof ApiError
-          ? caught.displayMessage
-          : 'Nao foi possivel falar com o servidor. A API esta rodando em localhost:5080?',
-      )
+      setError(caught instanceof ApiError ? caught.displayMessage : NETWORK_ERROR_MESSAGE)
     } finally {
       setBusy(false)
     }
@@ -55,7 +52,7 @@ export function Login() {
           <p className="mt-1 text-sm text-ink-faint">
             {mode === 'login'
               ? 'Use o e-mail e a senha que voce cadastrou.'
-              : 'Suas categorias padrao sao criadas junto com a conta.'}
+              : 'O FinanceMove e por convite. Suas categorias padrao sao criadas junto com a conta.'}
           </p>
 
           <form onSubmit={handleSubmit} className="mt-5 space-y-3">
@@ -78,9 +75,26 @@ export function Login() {
               value={password}
               onChange={setPassword}
               autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-              hint={mode === 'register' ? 'Minimo de 8 caracteres.' : undefined}
+              hint={
+                mode === 'register'
+                  ? 'Minimo de 12 caracteres. Uma frase facil de lembrar vale mais que simbolos.'
+                  : undefined
+              }
+              minLength={mode === 'register' ? 12 : undefined}
+              maxLength={128}
               required
             />
+
+            {mode === 'register' && (
+              <Field
+                label="Codigo de convite"
+                value={inviteCode}
+                onChange={setInviteCode}
+                autoComplete="off"
+                hint="Peca o codigo a quem te convidou."
+                required
+              />
+            )}
 
             {error && <ErrorState message={error} />}
 

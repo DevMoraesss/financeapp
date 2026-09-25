@@ -7,7 +7,7 @@ namespace FinanceMove.Api.Endpoints;
 /// <summary>Cadastro, login, refresh e logout (docs/api.md secao 2).</summary>
 internal static class AuthEndpoints
 {
-    private const string RefreshCookie = "refreshToken";
+    internal const string RefreshCookie = "refreshToken";
 
     public static void MapAuthEndpoints(this IEndpointRouteBuilder routes)
     {
@@ -20,7 +20,7 @@ internal static class AuthEndpoints
         {
             var user = await auth.RegisterAsync(request, cancellationToken);
             return Results.Created($"/api/v1/users/{user.Id}", user);
-        });
+        }).RequireRateLimiting(RateLimiting.AuthPolicy);
 
         group.MapPost("/login", async (
             LoginRequest request,
@@ -39,7 +39,7 @@ internal static class AuthEndpoints
 
             SetRefreshCookie(http, result);
             return Results.Ok(ToResponse(result));
-        });
+        }).RequireRateLimiting(RateLimiting.AuthPolicy);
 
         group.MapPost("/refresh", async (
             IAuthService auth,
@@ -57,13 +57,13 @@ internal static class AuthEndpoints
 
             if (result is null)
             {
-                http.Response.Cookies.Delete(RefreshCookie);
+                DeleteRefreshCookie(http);
                 return Unauthorized("Sessao expirada. Entre novamente.");
             }
 
             SetRefreshCookie(http, result);
             return Results.Ok(ToResponse(result));
-        });
+        }).RequireRateLimiting(RateLimiting.SessionPolicy);
 
         group.MapPost("/logout", async (
             IAuthService auth,
@@ -77,9 +77,9 @@ internal static class AuthEndpoints
                 await auth.LogoutAsync(token, cancellationToken);
             }
 
-            http.Response.Cookies.Delete(RefreshCookie);
+            DeleteRefreshCookie(http);
             return Results.NoContent();
-        });
+        }).RequireRateLimiting(RateLimiting.SessionPolicy);
     }
 
     /// <summary>
@@ -87,16 +87,35 @@ internal static class AuthEndpoints
     /// XSS nao rouba a sessao longa. So o access token (curto) chega ao front, e ele fica em
     /// memoria (ADR-001, Decisao 5).
     /// </summary>
-    private static void SetRefreshCookie(HttpContext http, AuthResult result) =>
-        http.Response.Cookies.Append(RefreshCookie, result.RefreshToken, new CookieOptions
-        {
-            HttpOnly = true,
-            Secure = http.Request.IsHttps,
-            SameSite = http.Request.IsHttps ? SameSiteMode.None : SameSiteMode.Lax,
-            Expires = result.RefreshExpiresAt,
-            Path = "/api/v1/auth",
-            IsEssential = true,
-        });
+    private static void SetRefreshCookie(HttpContext http, AuthResult result)
+    {
+        var options = RefreshCookieOptions(http);
+        options.Expires = result.RefreshExpiresAt;
+        http.Response.Cookies.Append(RefreshCookie, result.RefreshToken, options);
+    }
+
+    /// <summary>
+    /// Apagar cookie exige repetir o mesmo Path com que ele foi criado. Sem isso o navegador
+    /// entende que e outro cookie e mantem o original.
+    /// </summary>
+    internal static void DeleteRefreshCookie(HttpContext http) =>
+        http.Response.Cookies.Delete(RefreshCookie, RefreshCookieOptions(http));
+
+    /// <summary>
+    /// SameSite=Strict porque a SPA e a API respondem na MESMA origem: a Vercel repassa /api para
+    /// o Railway (docs/ADR-002). O navegador nunca manda este cookie em requisicao vinda de outro
+    /// site, o que fecha a porta para CSRF no refresh e no logout. Fora de desenvolvimento o
+    /// cookie e sempre Secure, mesmo que o proxy esqueca de avisar que a conexao era HTTPS.
+    /// </summary>
+    private static CookieOptions RefreshCookieOptions(HttpContext http) => new()
+    {
+        HttpOnly = true,
+        Secure = http.Request.IsHttps
+            || !http.RequestServices.GetRequiredService<IHostEnvironment>().IsDevelopment(),
+        SameSite = SameSiteMode.Strict,
+        Path = "/api/v1/auth",
+        IsEssential = true,
+    };
 
     private static object ToResponse(AuthResult result) => new
     {

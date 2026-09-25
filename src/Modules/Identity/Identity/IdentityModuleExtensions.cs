@@ -12,6 +12,13 @@ namespace FinanceMove.Modules.Identity;
 /// </summary>
 public static class IdentityModuleExtensions
 {
+    /// <summary>
+    /// Tamanho minimo da senha. Comprimento protege mais que simbolo obrigatorio: o NIST
+    /// (SP 800-63B) pede 15 para senha como fator unico; 12 e o meio-termo para uma frase facil
+    /// de lembrar, com lockout e rate limit cobrindo o resto.
+    /// </summary>
+    public const int MinPasswordLength = 12;
+
     public static IServiceCollection AddIdentityModule(
         this IServiceCollection services,
         string connectionString,
@@ -24,6 +31,7 @@ public static class IdentityModuleExtensions
                 npgsql.MigrationsHistoryTable("__ef_migrations_history", IdentityModuleDbContext.Schema)));
 
         services.Configure<JwtOptions>(configuration.GetSection(JwtOptions.SectionName));
+        services.Configure<RegistrationOptions>(configuration.GetSection(RegistrationOptions.SectionName));
 
         services
             .AddIdentityCore<AppUser>(options =>
@@ -31,8 +39,8 @@ public static class IdentityModuleExtensions
                 options.User.RequireUniqueEmail = true;
 
                 // Regra de senha: comprimento vale mais que simbolos obrigatorios, que so levam
-                // o usuario a inventar "Senha@123". Oito caracteres e o minimo do NIST.
-                options.Password.RequiredLength = 8;
+                // o usuario a inventar "Senha@123".
+                options.Password.RequiredLength = MinPasswordLength;
                 options.Password.RequireDigit = false;
                 options.Password.RequireUppercase = false;
                 options.Password.RequireLowercase = false;

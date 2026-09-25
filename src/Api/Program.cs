@@ -10,14 +10,38 @@ using FinanceMove.Modules.Transactions;
 using FinanceMove.Shared;
 using FinanceMove.Shared.Events;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // ---------------------------------------------------------------------------
+// Servidor HTTP
+// ---------------------------------------------------------------------------
+
+// O Railway informa a porta pela variavel PORT. Localmente ela nao existe e vale o --urls.
+if (Environment.GetEnvironmentVariable("PORT") is { Length: > 0 } port)
+{
+    builder.WebHost.UseUrls($"http://+:{port}");
+}
+
+builder.WebHost.ConfigureKestrel(kestrel =>
+{
+    // A maior requisicao legitima do app e um lancamento em JSON, com poucas centenas de bytes.
+    // O padrao do Kestrel (30 MB) so serviria para alguem entupir o servidor.
+    kestrel.Limits.MaxRequestBodySize = 64 * 1024;
+
+    // Nao anuncia "Server: Kestrel": informacao de graca para quem procura alvo.
+    kestrel.AddServerHeader = false;
+});
+
+// ---------------------------------------------------------------------------
 // Configuracao obrigatoria
 // ---------------------------------------------------------------------------
-var connectionString = builder.Configuration.GetConnectionString("Postgres")
+
+// Aceita chave=valor ou a URL postgresql:// do Railway (DATABASE_URL), ver PostgresConnectionString.
+var connectionString = PostgresConnectionString.Normalize(
+        builder.Configuration.GetConnectionString("Postgres") ?? builder.Configuration["DATABASE_URL"])
     ?? throw new InvalidOperationException(
         "ConnectionStrings:Postgres nao configurada. Rode 'docker compose up -d' e confira "
         + "appsettings.Development.json, ou defina a variavel de ambiente ConnectionStrings__Postgres.");
@@ -97,6 +121,23 @@ builder.Services
 
 builder.Services.AddAuthorization();
 
+// Em producao a API fica atras de dois proxies (Vercel e borda do Railway). Sem isto, o ASP.NET
+// enxergaria o IP do proxy em toda requisicao (o rate limit trataria todo mundo como uma pessoa
+// so) e acharia que a conexao e HTTP puro (o cookie de sessao sairia sem Secure).
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+
+    // Os IPs da Vercel e do Railway nao sao fixos nem publicados, entao nao da para lista-los.
+    // Limpar as listas faz o middleware aceitar a cadeia inteira; o IP resolvido e o primeiro
+    // do X-Forwarded-For, que a Vercel sobrescreve com o IP real do navegador.
+    options.KnownIPNetworks.Clear();
+    options.KnownProxies.Clear();
+    options.ForwardLimit = null;
+});
+
+builder.Services.AddFinanceMoveRateLimiting(builder.Configuration);
+
 // CORS de origem UNICA, nunca "*" (ADR-001, Decisao 4). Em desenvolvimento o Vite faz proxy,
 // entao nem chega a ser exercitado; em producao e o que separa a SPA do resto da internet.
 var allowedOrigin = builder.Configuration["Cors:AllowedOrigin"];
@@ -117,9 +158,38 @@ builder.Services.AddHealthChecks()
 
 var app = builder.Build();
 
+app.UseForwardedHeaders();
+
+if (!app.Environment.IsDevelopment())
+{
+    // Diz ao navegador para nunca mais tentar HTTP puro com este dominio.
+    app.UseHsts();
+}
+
+app.Use(async (context, next) =>
+{
+    // A API so devolve JSON. Estes cabecalhos garantem que nenhuma resposta dela seja
+    // interpretada como pagina, embutida em iframe ou guardada em cache.
+    var headers = context.Response.Headers;
+    headers.XContentTypeOptions = "nosniff";
+    headers.XFrameOptions = "DENY";
+    headers.ContentSecurityPolicy = "default-src 'none'; frame-ancestors 'none'";
+    headers["Referrer-Policy"] = "no-referrer";
+    headers["Cross-Origin-Resource-Policy"] = "same-origin";
+
+    if (context.Request.Path.StartsWithSegments("/api"))
+    {
+        // Dado financeiro nao fica em cache de navegador nem de proxy no meio do caminho.
+        headers.CacheControl = "no-store";
+    }
+
+    await next();
+});
+
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 app.UseCors();
+app.UseRateLimiter();
 
 app.UseAuthentication();
 app.UseAuthorization();
@@ -149,6 +219,13 @@ app.MapTransactionEndpoints();
 app.MapStatementEndpoints();
 app.MapBudgetEndpoints();
 app.MapDashboardEndpoints();
+
+// No Railway (Database__MigrateOnStartup=true) o banco se atualiza a cada deploy. Localmente
+// continua valendo o dotnet ef database update descrito no CLAUDE.md.
+if (app.Configuration.GetValue<bool>("Database:MigrateOnStartup"))
+{
+    await DatabaseMigrator.MigrateAsync(app.Services);
+}
 
 app.Run();
 
