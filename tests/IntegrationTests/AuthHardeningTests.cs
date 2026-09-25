@@ -44,6 +44,38 @@ public sealed class AuthHardeningTests(PostgresFixture fixture)
     }
 
     [Fact]
+    public async Task Register_ConviteComEspacoNoPainelEOutraCaixa_CriaConta()
+    {
+        // O valor veio do painel do Railway com espaco sobrando; o convidado digitou em maiuscula.
+        await using var factory = fixture.CreateFactory(new Dictionary<string, string?>
+        {
+            ["Registration:InviteCode"] = "a1b2c3d4e5f6 ",
+        });
+
+        var response = await factory.CreateClient().PostAsJsonAsync(
+            "/api/v1/auth/register",
+            NewUser(inviteCode: "A1B2C3D4E5F6"));
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Register_ConviteConfiguradoSoComEspacos_FechaOCadastro()
+    {
+        // Espaco em branco nao pode virar um "codigo vazio" que aceita qualquer convite vazio.
+        await using var factory = fixture.CreateFactory(new Dictionary<string, string?>
+        {
+            ["Registration:Open"] = "false",
+            ["Registration:InviteCode"] = "   ",
+        });
+
+        var response = await factory.CreateClient().PostAsJsonAsync("/api/v1/auth/register", NewUser(inviteCode: string.Empty));
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal("https://financemove.app/errors/registration-closed", await ProblemTypeAsync(response));
+    }
+
+    [Fact]
     public async Task Register_SemConviteESemCadastroAberto_Responde403()
     {
         // O padrao de producao: nada configurado significa cadastro FECHADO, nunca aberto.

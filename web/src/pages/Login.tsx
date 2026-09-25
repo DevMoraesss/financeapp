@@ -91,7 +91,10 @@ export function Login() {
                 value={inviteCode}
                 onChange={setInviteCode}
                 autoComplete="off"
-                hint="Peca o codigo a quem te convidou."
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                hint="Peca o codigo a quem te convidou. Cole so o codigo, sem o nome da variavel."
                 required
               />
             )}

@@ -25,7 +25,7 @@ echo "== Configuracao"
 if grep -q 'TROQUE-PELO-DOMINIO-DA-API' web/vercel.json; then
   bad "web/vercel.json ainda tem o dominio de exemplo: o /api da Vercel nao vai chegar ao Railway"
 else
-  ok "web/vercel.json aponta para $(grep -oE 'https://[^/\"]+' web/vercel.json | head -1)"
+  ok "web/vercel.json aponta para $(grep -oE 'https://[a-z0-9.-]+\.up\.railway\.app' web/vercel.json | head -1)"
 fi
 
 missing=""

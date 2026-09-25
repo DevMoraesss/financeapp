@@ -329,9 +329,17 @@ internal sealed class AuthService(
     /// Confere o codigo de convite em tempo constante: comparar string com == termina no primeiro
     /// caractere diferente, e o tempo de resposta ajudaria a adivinhar o codigo aos poucos.
     /// </summary>
+    /// <remarks>
+    /// Os dois lados passam pela mesma normalizacao (sem espacos nas pontas, sem diferenca de
+    /// maiuscula): um espaco colado junto no painel do Railway, ou o celular pondo a primeira letra
+    /// em maiuscula, nao podem barrar um convidado legitimo. O codigo e hexadecimal, entao ignorar
+    /// maiuscula nao tira seguranca nenhuma.
+    /// </remarks>
     private void EnsureInvited(string? informed)
     {
-        if (string.IsNullOrEmpty(_registration.InviteCode))
+        // Espaco em branco configurado conta como "sem codigo" (cadastro fechado). Se contasse como
+        // codigo, viraria "" depois da normalizacao e um convite vazio passaria.
+        if (string.IsNullOrWhiteSpace(_registration.InviteCode))
         {
             if (_registration.Open)
             {
@@ -344,14 +352,16 @@ internal sealed class AuthService(
                 "registration-closed");
         }
 
-        var expected = SHA256.HashData(Encoding.UTF8.GetBytes(_registration.InviteCode));
-        var actual = SHA256.HashData(Encoding.UTF8.GetBytes((informed ?? string.Empty).Trim()));
+        var expected = SHA256.HashData(Encoding.UTF8.GetBytes(NormalizeInvite(_registration.InviteCode)));
+        var actual = SHA256.HashData(Encoding.UTF8.GetBytes(NormalizeInvite(informed)));
 
         if (!CryptographicOperations.FixedTimeEquals(expected, actual))
         {
             throw new DomainException("Codigo de convite invalido.", StatusCodes.Forbidden, "invalid-invite");
         }
     }
+
+    private static string NormalizeInvite(string? value) => (value ?? string.Empty).Trim().ToUpperInvariant();
 
     private static void EnsurePasswordLength(string password)
     {
