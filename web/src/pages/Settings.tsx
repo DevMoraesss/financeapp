@@ -324,11 +324,26 @@ function AdjustBalanceModal({
 
 function DataSection() {
   const { logout } = useAuth()
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState<string | null>(null)
   const [confirming, setConfirming] = useState(false)
   const [confirmation, setConfirmation] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+
+  async function exportData() {
+    setExportError(null)
+    setExporting(true)
+
+    try {
+      await endpoints.exportCsv()
+    } catch (caught) {
+      setExportError(caught instanceof ApiError ? caught.displayMessage : 'Nao foi possivel exportar.')
+    } finally {
+      setExporting(false)
+    }
+  }
 
   async function destroy(event: React.FormEvent) {
     event.preventDefault()
@@ -353,12 +368,14 @@ function DataSection() {
             <p className="mt-1 text-xs text-ink-faint">
               Baixa suas transacoes em CSV. Serve de backup e cobre o direito de portabilidade.
             </p>
-            <a
-              href="/api/v1/me/export"
-              className="mt-3 inline-block text-sm font-medium text-brand hover:underline"
+            <button
+              onClick={exportData}
+              disabled={exporting}
+              className="mt-3 inline-block text-sm font-medium text-brand hover:underline disabled:opacity-60"
             >
-              Baixar CSV
-            </a>
+              {exporting ? 'Gerando...' : 'Baixar CSV'}
+            </button>
+            {exportError && <p className="mt-2 text-xs text-expense">{exportError}</p>}
           </div>
 
           <div className="rounded-xl border border-expense/25 p-4">

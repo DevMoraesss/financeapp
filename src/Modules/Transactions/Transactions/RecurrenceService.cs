@@ -82,11 +82,18 @@ internal sealed class RecurrenceService(
 
         ValidateSchedule(request);
 
+        var description = (request.Description ?? string.Empty).Trim();
+
+        if (description.Length is 0 or > 120)
+        {
+            throw DomainException.Unprocessable("A descricao e obrigatoria e tem ate 120 caracteres.", "invalid-description");
+        }
+
         var rule = new RecurrenceRule
         {
             Id = Guid.CreateVersion7(),
             UserId = userId,
-            Description = request.Description.Trim(),
+            Description = description,
             Amount = Money.Round(request.Amount),
             Type = request.Type,
             CategoryId = request.CategoryId,

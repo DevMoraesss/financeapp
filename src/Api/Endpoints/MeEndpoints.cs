@@ -38,7 +38,7 @@ internal static class MeEndpoints
             return changed
                 ? Results.NoContent()
                 : throw DomainException.Unprocessable("A senha atual esta incorreta.", "invalid-password");
-        });
+        }).RequireRateLimiting(RateLimiting.AuthPolicy);
 
         // SPEC US-12: portabilidade. CSV com BOM porque o Excel brasileiro so reconhece acento
         // com ele, separador ponto e virgula porque a virgula ja e o separador decimal daqui.
@@ -47,17 +47,32 @@ internal static class MeEndpoints
             ITransactionService transactions,
             CancellationToken cancellationToken) =>
         {
-            var page = await transactions.ListAsync(
-                user.Id,
-                new TransactionFilter(Page: 1, Size: 200),
-                cancellationToken);
+            // Pagina ate o fim: a listagem devolve no maximo 200 por vez, e exportar so a primeira
+            // pagina entregaria um "backup" incompleto sem avisar ninguem.
+            var items = new List<TransactionDto>();
+
+            for (var pageNumber = 1; ; pageNumber++)
+            {
+                var page = await transactions.ListAsync(
+                    user.Id,
+                    new TransactionFilter(Page: pageNumber, Size: 200),
+                    cancellationToken);
+
+                items.AddRange(page.Items);
+
+                if (pageNumber >= page.Pagination.TotalPages)
+                {
+                    break;
+                }
+            }
 
             var csv = new StringBuilder();
-            csv.AppendLine("Data;Descricao;Tipo;Categoria;Conta;Conta destino;Status;Parcela;Valor");
+            csv.AppendLine("Data;Descricao;Tipo;Categoria;Conta;Conta destino;Status;Parcela;Fatura;Valor");
 
-            foreach (var transaction in page.Items)
+            foreach (var transaction in items)
             {
                 var installment = transaction.Installment is { } part ? $"{part.Number}/{part.Total}" : string.Empty;
+                var statement = transaction.StatementMonth is { Length: 7 } month ? $"{month[5..]}/{month[..4]}" : string.Empty;
 
                 csv.AppendLine(string.Join(';',
                     transaction.Date.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture),
@@ -68,6 +83,7 @@ internal static class MeEndpoints
                     Escape(transaction.DestinationAccount?.Name ?? string.Empty),
                     transaction.Status == TransactionStatus.Confirmed ? "Confirmada" : "Pendente",
                     installment,
+                    statement,
                     transaction.Amount.ToString("F2", CultureInfo.GetCultureInfo("pt-BR"))));
             }
 
@@ -99,9 +115,9 @@ internal static class MeEndpoints
                 throw DomainException.Unprocessable("A senha informada esta incorreta.", "invalid-password");
             }
 
-            http.Response.Cookies.Delete("refreshToken", new CookieOptions { Path = "/api/v1/auth" });
+            AuthEndpoints.DeleteRefreshCookie(http);
             return Results.NoContent();
-        });
+        }).RequireRateLimiting(RateLimiting.AuthPolicy);
     }
 
     private static string TypeLabel(TransactionType type) => type switch
@@ -111,8 +127,20 @@ internal static class MeEndpoints
         _ => "Transferencia",
     };
 
-    /// <summary>Ponto e virgula dentro do texto quebraria a coluna do CSV.</summary>
-    private static string Escape(string value) => value.Replace(';', ',');
+    /// <summary>
+    /// Deixa um texto do usuario seguro para uma celula do CSV.
+    /// </summary>
+    /// <remarks>
+    /// Ponto e virgula e quebra de linha quebrariam a coluna. E texto comecando com = + - @ vira
+    /// FORMULA quando o arquivo abre no Excel (CSV injection): uma descricao como
+    /// <c>=HYPERLINK(...)</c> executaria ao abrir o backup. O apostrofo na frente faz o Excel
+    /// tratar a celula como texto.
+    /// </remarks>
+    internal static string Escape(string value)
+    {
+        var clean = value.Replace(';', ',').Replace('\r', ' ').Replace('\n', ' ');
+        return clean.Length > 0 && "=+-@\t".Contains(clean[0], StringComparison.Ordinal) ? $"'{clean}" : clean;
+    }
 }
 
 internal sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);

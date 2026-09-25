@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { auth as authApi, setAccessToken, setSessionLostHandler, type User } from './api'
+import { auth as authApi, refreshSession, setAccessToken, setSessionLostHandler, type User } from './api'
 
 type AuthState =
   /** Ainda tentando renovar a sessao pelo cookie. Evita piscar a tela de login em cada F5. */
@@ -9,7 +9,7 @@ type AuthState =
 
 type AuthContextValue = AuthState & {
   login: (email: string, password: string) => Promise<void>
-  register: (name: string, email: string, password: string) => Promise<void>
+  register: (name: string, email: string, password: string, inviteCode: string) => Promise<void>
   logout: () => Promise<void>
 }
 
@@ -20,21 +20,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Ao recarregar a pagina o access token (que so vive em memoria) some. O refresh token esta
   // no cookie httpOnly, entao tentamos renovar em silencio antes de decidir que o usuario saiu.
+  // refreshSession compartilha a chamada: o StrictMode monta o efeito duas vezes em
+  // desenvolvimento, e duas renovacoes com o mesmo cookie nao devem sair do navegador.
   useEffect(() => {
     let cancelled = false
 
-    authApi
-      .refresh()
-      .then((response) => {
-        if (cancelled) return
-        setAccessToken(response.accessToken)
+    void refreshSession().then((response) => {
+      if (cancelled) return
+
+      if (response) {
         setState({ status: 'authenticated', user: response.user })
-      })
-      .catch(() => {
-        if (cancelled) return
+      } else {
         setAccessToken(null)
         setState({ status: 'anonymous' })
-      })
+      }
+    })
 
     return () => {
       cancelled = true
@@ -58,8 +58,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const register = useCallback(
-    async (name: string, email: string, password: string) => {
-      await authApi.register(name, email, password)
+    async (name: string, email: string, password: string, inviteCode: string) => {
+      await authApi.register(name, email, password, inviteCode)
       await login(email, password)
     },
     [login],

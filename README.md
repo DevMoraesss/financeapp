@@ -10,7 +10,7 @@ Construído como **monólito modular** porque um dia vira o módulo financeiro d
 | **Backend** | .NET 10 · ASP.NET Core · EF Core · PostgreSQL 17 |
 | **Frontend** | React + Vite (SPA separada) |
 | **Auth** | ASP.NET Identity com bearer token + refresh rotacionado |
-| **Hospedagem** | Railway (API + banco) · Cloudflare Pages (SPA) |
+| **Hospedagem** | Railway (API + banco) · Vercel (SPA, repassando `/api` para o Railway) |
 
 > **Status:** MVP funcional de ponta a ponta. Cadastro, login, contas, transações (com
 > transferência, parcelamento e recorrência), faturas de cartão, orçamento e dashboard.
@@ -113,7 +113,14 @@ dotnet test FinanceMove.sln
 ```
 
 Os testes de integração sobem um Postgres próprio via Testcontainers - **o Docker precisa estar
-rodando**. Para os testes rápidos, sem Docker:
+rodando**. Sem Docker, aponte para qualquer Postgres acessível (o fixture cria e apaga um banco
+descartável nele):
+
+```bash
+FINANCEMOVE_TEST_POSTGRES="Host=127.0.0.1;Port=5432;Database=postgres;Username=postgres;Password=..." dotnet test FinanceMove.sln
+```
+
+Para os testes rápidos, sem banco nenhum:
 
 ```bash
 dotnet test tests/UnitTests
@@ -137,8 +144,14 @@ financeapp/
 | +-- ADR-001-arquitetura.md decisões técnicas e o que foi rejeitado
 | +-- arquitetura.md componentes e fronteiras dos módulos
 | +-- modelo-de-dados.md tabelas, índices e as justificativas técnicas
+| +-- ADR-002-deploy-e-seguranca.md Vercel + proxy, convite, rate limit
 | +-- api.md contrato dos endpoints
+| +-- deploy.md roteiro de deploy e operacao (Railway + Vercel)
+| +-- prompts.md prompts prontos para as proximas fases
 | \-- fluxos-usuario.md jornadas camada a camada
++-- .claude/skills/          skills do projeto para o Claude Code (feature, modulo, deploy...)
++-- Dockerfile               imagem da API (Railway)
++-- railway.json             build e healthcheck no Railway
 +-- docker-compose.yml       Postgres de desenvolvimento
 +-- FinanceMove.sln
 +-- tools/                  scripts de apoio (smoke, limpeza de caracteres)
@@ -176,7 +189,9 @@ Cada módulo é um par de projetos: `X.Contracts` (o que os outros módulos enxe
 | Dashboard | saldos, resumo do mês, donut, pendências | pronto |
 | Metas e Investimentos | v2, desenhados em `docs/` e ainda não implementados | pendente |
 | Importação CSV/OFX | v2 | pendente |
-| CI/CD e deploy no Railway | GitHub Actions, imagem Docker, migrations no deploy | pendente |
+| CI/CD e deploy | GitHub Actions, imagem Docker, migrations no deploy, Vercel + proxy | pronto (primeiro deploy: `docs/deploy.md`) |
+| Seguranca do deploy publico | convite, teto de usuarios, rate limit, cabecalhos, sessao estavel | pronto |
+| 2FA (TOTP) | autenticador no celular | pendente |
 
 ## Licença
 

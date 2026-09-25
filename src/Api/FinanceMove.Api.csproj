@@ -23,6 +23,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Os helpers do host sao internal; os testes enxergam mesmo assim. -->
+    <InternalsVisibleTo Include="FinanceMove.UnitTests" />
+    <InternalsVisibleTo Include="FinanceMove.IntegrationTests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Shared\FinanceMove.Shared.csproj" />
     <ProjectReference Include="..\Modules\Identity\Identity.Contracts\FinanceMove.Modules.Identity.Contracts.csproj" />
     <ProjectReference Include="..\Modules\Identity\Identity\FinanceMove.Modules.Identity.csproj" />

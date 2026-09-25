@@ -32,6 +32,12 @@ appsettings.Production.json
 *.pfx
 *.key
 
+# ---------- Dados financeiros pessoais ----------
+# Exportacoes (CSV) e extratos usados pela skill financemove-analise. Dado real do usuario NUNCA
+# vai para o git, nem em repositorio privado.
+dados-pessoais/
+*.ofx
+
 # ---------- Ferramentas / SO ----------
 .idea/
 .DS_Store

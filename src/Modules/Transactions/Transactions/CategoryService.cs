@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using FinanceMove.Modules.Identity.Contracts;
 using FinanceMove.Modules.Transactions.Contracts;
 using FinanceMove.Shared;
@@ -6,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace FinanceMove.Modules.Transactions;
 
-internal sealed class CategoryService(TransactionsDbContext context, IClock clock) : ICategoryService
+internal sealed partial class CategoryService(TransactionsDbContext context, IClock clock) : ICategoryService
 {
     /// <summary>Nome reservado das categorias de sistema usadas pelo ajuste de saldo.</summary>
     internal const string AdjustmentName = "Ajuste";
@@ -31,20 +32,8 @@ internal sealed class CategoryService(TransactionsDbContext context, IClock cloc
         CreateCategoryRequest request,
         CancellationToken cancellationToken = default)
     {
-        var name = request.Name.Trim();
-
-        // ILike do Postgres: comparacao sem diferenciar maiusculas, resolvida no banco.
-        var duplicated = await context.Categories.AnyAsync(
-            category => category.UserId == userId
-                && !category.Archived
-                && category.Type == request.Type
-                && EF.Functions.ILike(category.Name, name),
-            cancellationToken);
-
-        if (duplicated)
-        {
-            throw DomainException.Conflict($"Ja existe uma categoria chamada \"{name}\".", "duplicate-category");
-        }
+        var (name, color, icon) = RequireAppearance(request.Name, request.Color, request.Icon);
+        await EnsureUniqueNameAsync(userId, name, request.Type, exceptId: null, cancellationToken);
 
         var category = new Category
         {
@@ -52,8 +41,8 @@ internal sealed class CategoryService(TransactionsDbContext context, IClock cloc
             UserId = userId,
             Name = name,
             Type = request.Type,
-            Color = request.Color,
-            Icon = request.Icon,
+            Color = color,
+            Icon = icon,
             System = false,
             Archived = false,
             CreatedAt = clock.UtcNow,
@@ -87,9 +76,12 @@ internal sealed class CategoryService(TransactionsDbContext context, IClock cloc
                 "system-category");
         }
 
-        category.Name = request.Name.Trim();
-        category.Color = request.Color;
-        category.Icon = request.Icon;
+        var (name, color, icon) = RequireAppearance(request.Name, request.Color, request.Icon);
+        await EnsureUniqueNameAsync(userId, name, category.Type, exceptId: categoryId, cancellationToken);
+
+        category.Name = name;
+        category.Color = color;
+        category.Icon = icon;
         category.UpdatedAt = clock.UtcNow;
 
         await context.SaveChangesAsync(cancellationToken);
@@ -121,6 +113,60 @@ internal sealed class CategoryService(TransactionsDbContext context, IClock cloc
         await context.SaveChangesAsync(cancellationToken);
         return true;
     }
+
+    /// <summary>
+    /// Nome, cor e icone dentro do que o banco e a tela aceitam. A cor vai parar num atributo de
+    /// estilo no front, entao so passa hexadecimal puro, nunca texto livre.
+    /// </summary>
+    private static (string Name, string Color, string Icon) RequireAppearance(string? name, string? color, string? icon)
+    {
+        var trimmed = (name ?? string.Empty).Trim();
+
+        if (trimmed.Length is 0 or > 40)
+        {
+            throw DomainException.Unprocessable("O nome da categoria e obrigatorio e tem ate 40 caracteres.", "invalid-name");
+        }
+
+        if (color is null || !HexColor().IsMatch(color))
+        {
+            throw DomainException.Unprocessable("Cor invalida. Use o formato #RRGGBB.", "invalid-color");
+        }
+
+        if (icon is null || !IconName().IsMatch(icon))
+        {
+            throw DomainException.Unprocessable("Icone invalido.", "invalid-icon");
+        }
+
+        return (trimmed, color.ToLowerInvariant(), icon);
+    }
+
+    private async Task EnsureUniqueNameAsync(
+        Guid userId,
+        string name,
+        CategoryKind type,
+        Guid? exceptId,
+        CancellationToken cancellationToken)
+    {
+        // ILike do Postgres: comparacao sem diferenciar maiusculas, resolvida no banco.
+        var duplicated = await context.Categories.AnyAsync(
+            category => category.UserId == userId
+                && category.Id != exceptId
+                && !category.Archived
+                && category.Type == type
+                && EF.Functions.ILike(category.Name, name),
+            cancellationToken);
+
+        if (duplicated)
+        {
+            throw DomainException.Conflict($"Ja existe uma categoria chamada \"{name}\".", "duplicate-category");
+        }
+    }
+
+    [GeneratedRegex("^#[0-9a-fA-F]{6}$")]
+    private static partial Regex HexColor();
+
+    [GeneratedRegex("^[a-z0-9-]{1,40}$")]
+    private static partial Regex IconName();
 }
 
 /// <summary>

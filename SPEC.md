@@ -34,7 +34,7 @@ Registradas para o "eu do futuro" não reabrir discussão sem motivo novo.
 
 | # | Decisão | Por quê |
 |---|---|---|
-| D1 | **Stack (revista em 15/08/2026): API C#/.NET (ASP.NET Core + EF Core) como monólito modular + SPA React (Vite) separada. Postgres + API no Railway; SPA no Cloudflare Pages. Ver `docs/ADR-001-arquitetura.md`.** | Fatos novos: o FinanceMove será o módulo financeiro do hub AppLife (exige monólito modular) e aprofundar C# virou requisito. O ADR registra o debate e as alternativas rejeitadas. |
+| D1 | **Stack (revista em 15/08/2026): API C#/.NET (ASP.NET Core + EF Core) como monólito modular + SPA React (Vite) separada. Postgres + API no Railway; SPA no Cloudflare Pages (revisto em 24/09/2026: SPA na Vercel, com proxy de mesma origem - `docs/ADR-002-deploy-e-seguranca.md`). Ver `docs/ADR-001-arquitetura.md`.** | Fatos novos: o FinanceMove será o módulo financeiro do hub AppLife (exige monólito modular) e aprofundar C# virou requisito. O ADR registra o debate e as alternativas rejeitadas. |
 | D2 | **Auth (revisto em 15/08/2026): ASP.NET Identity com bearer tokens (access curto + refresh com rotação). Login Google fica para a fase 2. Ver ADR-001.** | Com backend C#, o Identity dá hash/lockout/reset prontos do framework (nada de cripto à mão), mantém a identidade no nosso banco (LGPD; futuro módulo Identidade do AppLife) e ensina o fluxo real de auth. |
 | D3 | **Modelo individual:** todo dado pertence a exatamente 1 usuário (`usuario_id` em tudo). Sem espaços compartilhados/casal. | Simplicidade. Compartilhamento é migração dolorosa, mas é um futuro incerto - não se paga por ele agora. |
 | D4 | **Saldo é sempre derivado** (`saldo_inicial + soma transações`), nunca armazenado. Divergência com o banco real se corrige com **transação de ajuste**. | Saldo armazenado dessincroniza silenciosamente (causa nº 1 de bug nesses apps). No volume esperado, a soma custa milissegundos. |
@@ -311,7 +311,7 @@ da navegação até a v2.
 - Páginas principais respondem em < 2 s; nenhuma otimização prematura (sem cache de saldo, sem réplicas - D4 explica).
 
 ### 9.2 Custo
-- Teto: **~US$ 5/mês (Railway, já pago)** - API .NET + Postgres no Railway; SPA no Cloudflare Pages (grátis); e-mail transacional no Resend (free). Total extra: R$ 0.
+- Teto: **~US$ 5/mês (Railway, já pago)** - API .NET + Postgres no Railway; SPA na Vercel (Hobby, grátis; antes previsto no Cloudflare Pages); e-mail transacional no Resend (free). Total extra: R$ 0.
 
 ### 9.3 Segurança
 - Auth via ASP.NET Identity com bearer tokens (D2/ADR-001). Token verificado **no servidor** em toda rota/API; CORS restrito à origem única da SPA.

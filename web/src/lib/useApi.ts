@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ApiError } from './api'
+import { ApiError, NETWORK_ERROR_MESSAGE } from './api'
 
 type State<T> =
   | { status: 'loading' }
@@ -33,10 +33,7 @@ export function useApi<T>(
 
         setState({
           status: 'error',
-          message:
-            error instanceof ApiError
-              ? error.displayMessage
-              : 'Nao foi possivel falar com o servidor. A API esta rodando em localhost:5080?',
+          message: error instanceof ApiError ? error.displayMessage : NETWORK_ERROR_MESSAGE,
         })
       })
 

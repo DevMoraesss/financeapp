@@ -61,9 +61,13 @@ internal sealed class TransactionService(
         var size = Math.Clamp(filter.Size, 1, 200);
         var page = Math.Max(filter.Page, 1);
 
+        // O desempate final pelo id deixa a ordem ESTAVEL entre paginas: as parcelas de uma compra
+        // nascem com o mesmo CreatedAt, e sem isso o Postgres poderia repetir uma na pagina 2 e
+        // pular outra (a exportacao, que pagina ate o fim, perderia lancamentos).
         var items = await query
             .OrderByDescending(transaction => transaction.Date)
             .ThenByDescending(transaction => transaction.CreatedAt)
+            .ThenByDescending(transaction => transaction.Id)
             .Skip((page - 1) * size)
             .Take(size)
             .ToListAsync(cancellationToken);
@@ -76,7 +80,7 @@ internal sealed class TransactionService(
 
         return new TransactionListDto(
             items.Select(transaction => Mapping.ToDto(transaction, accounts)).ToList(),
-            new PaginationDto(page, size, total, (int)Math.Ceiling(total / (double)size)),
+            new PaginationDto(page, size, total, (total + size - 1) / size),
             summary);
     }
 
@@ -369,7 +373,9 @@ internal sealed class TransactionService(
             .ExecuteDeleteAsync(cancellationToken);
 
         var remaining = await context.Transactions
-            .AnyAsync(transaction => transaction.InstallmentGroupId == groupId, cancellationToken);
+            .AnyAsync(
+                transaction => transaction.UserId == userId && transaction.InstallmentGroupId == groupId,
+                cancellationToken);
 
         if (!remaining)
         {
@@ -461,9 +467,9 @@ internal sealed class TransactionService(
         return rounded;
     }
 
-    private static string RequireDescription(string description)
+    private static string RequireDescription(string? description)
     {
-        var trimmed = description.Trim();
+        var trimmed = (description ?? string.Empty).Trim();
 
         if (trimmed.Length == 0)
         {

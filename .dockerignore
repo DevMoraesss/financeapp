@@ -1,0 +1,15 @@
+# So o backend entra na imagem. O resto so deixaria o build mais lento (e o .git e o .env nunca
+# devem ir parar numa imagem).
+.git
+.github
+.vscode
+.env
+.env.*
+**/bin
+**/obj
+web/
+tests/
+docs/
+tools/
+*.md
+docker-compose.yml

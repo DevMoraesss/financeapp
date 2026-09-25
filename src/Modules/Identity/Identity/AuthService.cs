@@ -12,18 +12,63 @@ using Microsoft.IdentityModel.Tokens;
 
 namespace FinanceMove.Modules.Identity;
 
+/// <summary>Codigos HTTP usados pelo modulo, sem puxar a dependencia do ASP.NET para ca.</summary>
+file static class StatusCodes
+{
+    public const int Forbidden = 403;
+}
+
 internal sealed class AuthService(
     UserManager<AppUser> userManager,
     IdentityModuleDbContext context,
     IOptions<JwtOptions> jwtOptions,
+    IOptions<RegistrationOptions> registrationOptions,
     IEventBus eventBus,
     IClock clock) : IAuthService
 {
+    /// <summary>
+    /// Teto de tamanho da senha. O hash PBKDF2 custa caro de proposito; sem teto, uma senha de
+    /// megabytes viraria um jeito barato de ocupar a CPU do servidor.
+    /// </summary>
+    internal const int MaxPasswordLength = 128;
+
+    /// <summary>
+    /// Janela em que um refresh token recem-rotacionado ainda pode ser trocado de novo.
+    /// </summary>
+    /// <remarks>
+    /// Existe por causa de uma corrida benigna e comum: duas abas abertas, ou tres requisicoes da
+    /// mesma tela recebendo 401 juntas, renovam a sessao com o MESMO cookie em milissegundos de
+    /// diferenca. Sem a janela, a segunda renovacao parecia roubo de token e derrubava a sessao
+    /// inteira, e o usuario era deslogado a cada 15 minutos. Fora da janela, reuso continua
+    /// sendo tratado como roubo.
+    /// </remarks>
+    internal static readonly TimeSpan ReuseGrace = TimeSpan.FromSeconds(30);
+
     private readonly JwtOptions _jwt = jwtOptions.Value;
+    private readonly RegistrationOptions _registration = registrationOptions.Value;
 
     public async Task<UserDto> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default)
     {
-        var email = request.Email.Trim();
+        // Convite primeiro, antes de qualquer consulta: sem o codigo certo, a resposta e sempre a
+        // mesma e nao revela nada sobre quem ja tem conta.
+        EnsureInvited(request.InviteCode);
+
+        var name = (request.Name ?? string.Empty).Trim();
+        var email = (request.Email ?? string.Empty).Trim();
+        var password = request.Password ?? string.Empty;
+
+        if (name.Length is 0 or > 120)
+        {
+            throw DomainException.Unprocessable("Informe seu nome (ate 120 caracteres).", "invalid-name");
+        }
+
+        if (email.Length is < 3 or > 254)
+        {
+            throw DomainException.Unprocessable("E-mail invalido.", "invalid-email");
+        }
+
+        EnsurePasswordLength(password);
+
         var existing = await userManager.FindByEmailAsync(email);
 
         if (existing is not null)
@@ -33,16 +78,25 @@ internal sealed class AuthService(
             return new UserDto(existing.Id, existing.Name, existing.Email!);
         }
 
+        if (_registration.MaxUsers > 0
+            && await context.Users.CountAsync(cancellationToken) >= _registration.MaxUsers)
+        {
+            throw new DomainException(
+                "O limite de usuarios deste FinanceMove foi atingido.",
+                StatusCodes.Forbidden,
+                "user-limit-reached");
+        }
+
         var user = new AppUser
         {
             Id = Guid.CreateVersion7(),
-            Name = request.Name.Trim(),
+            Name = name,
             Email = email,
             UserName = email,
             CreatedAt = clock.UtcNow,
         };
 
-        var result = await userManager.CreateAsync(user, request.Password);
+        var result = await userManager.CreateAsync(user, password);
 
         if (!result.Succeeded)
         {
@@ -59,6 +113,13 @@ internal sealed class AuthService(
 
     public async Task<AuthResult?> LoginAsync(LoginRequest request, CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(request.Email)
+            || string.IsNullOrEmpty(request.Password)
+            || request.Password.Length > MaxPasswordLength)
+        {
+            return null;
+        }
+
         var user = await userManager.FindByEmailAsync(request.Email.Trim());
 
         if (user is null)
@@ -86,33 +147,57 @@ internal sealed class AuthService(
     public async Task<AuthResult?> RefreshAsync(string refreshToken, CancellationToken cancellationToken = default)
     {
         var hash = Hash(refreshToken);
-        var stored = await context.RefreshTokens.FirstOrDefaultAsync(token => token.TokenHash == hash, cancellationToken);
+        var stored = await FindTokenAsync(token => token.TokenHash == hash, cancellationToken);
 
-        if (stored is null || stored.ExpiresAt <= clock.UtcNow)
+        if (stored is null)
         {
             return null;
         }
 
-        if (stored.RevokedAt is not null)
+        if (stored.RevokedAt is null)
         {
-            // Token ja usado sendo apresentado de novo: sinal classico de roubo. Derruba a
-            // cadeia inteira do usuario, obrigando novo login.
-            await context.RefreshTokens
-                .Where(token => token.UserId == stored.UserId && token.RevokedAt == null)
-                .ExecuteUpdateAsync(update => update.SetProperty(token => token.RevokedAt, clock.UtcNow), cancellationToken);
+            // Revogacao CONDICIONAL: se duas requisicoes chegarem juntas, so uma consegue
+            // rotacionar. O id do sucessor ja vai gravado na mesma escrita, para a perdedora
+            // enxergar que foi uma rotacao (e nao um logout) ao reler o token.
+            var successorId = Guid.CreateVersion7();
+            var now = clock.UtcNow;
 
-            return null;
+            var rotated = await context.RefreshTokens
+                .Where(token => token.Id == stored.Id && token.RevokedAt == null)
+                .ExecuteUpdateAsync(
+                    update => update
+                        .SetProperty(token => token.RevokedAt, now)
+                        .SetProperty(token => token.ReplacedBy, successorId),
+                    cancellationToken);
+
+            if (rotated == 1)
+            {
+                return await IssueForAsync(stored.UserId, successorId, cancellationToken);
+            }
+
+            // Perdeu a corrida: outra requisicao acabou de rotacionar este token. Rele e segue
+            // para a regra da janela de tolerancia logo abaixo.
+            stored = await FindTokenAsync(token => token.Id == stored.Id, cancellationToken);
+
+            if (stored?.RevokedAt is null)
+            {
+                return null;
+            }
         }
 
-        var user = await context.Users.FirstOrDefaultAsync(candidate => candidate.Id == stored.UserId, cancellationToken);
+        var reusedAt = clock.UtcNow;
 
-        if (user is null)
+        // So token ROTACIONADO (com sucessor) ganha tolerancia. Token revogado por logout ou por
+        // troca de senha nao tem sucessor e morre na hora.
+        if (stored.ReplacedBy is not null && reusedAt - stored.RevokedAt.Value <= ReuseGrace)
         {
-            return null;
+            return await IssueForAsync(stored.UserId, Guid.CreateVersion7(), cancellationToken);
         }
 
-        var issued = await IssueAsync(user, cancellationToken, replacing: stored);
-        return issued;
+        // Token ja usado sendo apresentado de novo, fora da janela: sinal classico de roubo.
+        // Derruba todas as sessoes do usuario, obrigando novo login em todo lugar.
+        await RevokeAllSessionsAsync(stored.UserId, cancellationToken);
+        return null;
     }
 
     public async Task LogoutAsync(string refreshToken, CancellationToken cancellationToken = default)
@@ -126,6 +211,11 @@ internal sealed class AuthService(
 
     public async Task<bool> DeleteAccountAsync(Guid userId, string password, CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrEmpty(password) || password.Length > MaxPasswordLength)
+        {
+            return false;
+        }
+
         var user = await userManager.FindByIdAsync(userId.ToString());
 
         if (user is null || !await userManager.CheckPasswordAsync(user, password))
@@ -145,30 +235,43 @@ internal sealed class AuthService(
         string newPassword,
         CancellationToken cancellationToken = default)
     {
+        EnsurePasswordLength(newPassword ?? string.Empty);
+
         var user = await userManager.FindByIdAsync(userId.ToString());
 
-        if (user is null)
+        if (user is null || string.IsNullOrEmpty(currentPassword) || currentPassword.Length > MaxPasswordLength)
         {
             return false;
         }
 
-        var result = await userManager.ChangePasswordAsync(user, currentPassword, newPassword);
-
-        if (result.Succeeded)
+        if (!await userManager.CheckPasswordAsync(user, currentPassword))
         {
-            // Trocar a senha derruba todas as sessoes abertas em outros dispositivos.
-            await context.RefreshTokens
-                .Where(token => token.UserId == userId && token.RevokedAt == null)
-                .ExecuteUpdateAsync(update => update.SetProperty(token => token.RevokedAt, clock.UtcNow), cancellationToken);
+            return false;
         }
 
-        return result.Succeeded;
+        var result = await userManager.ChangePasswordAsync(user, currentPassword, newPassword!);
+
+        if (!result.Succeeded)
+        {
+            var reasons = string.Join(' ', result.Errors.Select(TranslateIdentityError));
+            throw DomainException.Unprocessable(reasons, "invalid-password");
+        }
+
+        // Trocar a senha derruba todas as sessoes abertas, em todos os dispositivos.
+        await RevokeAllSessionsAsync(userId, cancellationToken);
+        return true;
+    }
+
+    private async Task<AuthResult?> IssueForAsync(Guid userId, Guid refreshTokenId, CancellationToken cancellationToken)
+    {
+        var user = await context.Users.FirstOrDefaultAsync(candidate => candidate.Id == userId, cancellationToken);
+        return user is null ? null : await IssueAsync(user, cancellationToken, refreshTokenId);
     }
 
     private async Task<AuthResult> IssueAsync(
         AppUser user,
         CancellationToken cancellationToken,
-        RefreshToken? replacing = null)
+        Guid? refreshTokenId = null)
     {
         var now = clock.UtcNow;
         var accessExpires = now.AddMinutes(_jwt.AccessTokenMinutes);
@@ -182,7 +285,7 @@ internal sealed class AuthService(
 
         var refresh = new RefreshToken
         {
-            Id = Guid.CreateVersion7(),
+            Id = refreshTokenId ?? Guid.CreateVersion7(),
             UserId = user.Id,
             TokenHash = Hash(rawRefresh),
             ExpiresAt = refreshExpires,
@@ -190,13 +293,6 @@ internal sealed class AuthService(
         };
 
         context.RefreshTokens.Add(refresh);
-
-        if (replacing is not null)
-        {
-            replacing.RevokedAt = now;
-            replacing.ReplacedBy = refresh.Id;
-        }
-
         await context.SaveChangesAsync(cancellationToken);
 
         return new AuthResult(
@@ -205,6 +301,66 @@ internal sealed class AuthService(
             rawRefresh,
             refreshExpires,
             new UserDto(user.Id, user.Name, user.Email!));
+    }
+
+    private Task<RefreshToken?> FindTokenAsync(
+        System.Linq.Expressions.Expression<Func<RefreshToken, bool>> predicate,
+        CancellationToken cancellationToken) =>
+        context.RefreshTokens.AsNoTracking().FirstOrDefaultAsync(predicate, cancellationToken);
+
+    /// <summary>
+    /// Mata todas as sessoes do usuario, inclusive tokens rotacionados que ainda estariam dentro
+    /// da janela de tolerancia: vencer o <c>ExpiresAt</c> e o que fecha essa porta.
+    /// </summary>
+    private async Task RevokeAllSessionsAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        var now = clock.UtcNow;
+
+        await context.RefreshTokens
+            .Where(token => token.UserId == userId && token.ExpiresAt > now)
+            .ExecuteUpdateAsync(
+                update => update
+                    .SetProperty(token => token.ExpiresAt, now)
+                    .SetProperty(token => token.RevokedAt, token => token.RevokedAt ?? now),
+                cancellationToken);
+    }
+
+    /// <summary>
+    /// Confere o codigo de convite em tempo constante: comparar string com == termina no primeiro
+    /// caractere diferente, e o tempo de resposta ajudaria a adivinhar o codigo aos poucos.
+    /// </summary>
+    private void EnsureInvited(string? informed)
+    {
+        if (string.IsNullOrEmpty(_registration.InviteCode))
+        {
+            if (_registration.Open)
+            {
+                return;
+            }
+
+            throw new DomainException(
+                "O cadastro esta fechado. Peca um convite a quem administra o FinanceMove.",
+                StatusCodes.Forbidden,
+                "registration-closed");
+        }
+
+        var expected = SHA256.HashData(Encoding.UTF8.GetBytes(_registration.InviteCode));
+        var actual = SHA256.HashData(Encoding.UTF8.GetBytes((informed ?? string.Empty).Trim()));
+
+        if (!CryptographicOperations.FixedTimeEquals(expected, actual))
+        {
+            throw new DomainException("Codigo de convite invalido.", StatusCodes.Forbidden, "invalid-invite");
+        }
+    }
+
+    private static void EnsurePasswordLength(string password)
+    {
+        if (password.Length > MaxPasswordLength)
+        {
+            throw DomainException.Unprocessable(
+                $"A senha pode ter no maximo {MaxPasswordLength} caracteres.",
+                "password-too-long");
+        }
     }
 
     private string BuildAccessToken(AppUser user, DateTimeOffset expiresAt)
@@ -237,7 +393,7 @@ internal sealed class AuthService(
 
     private static string TranslateIdentityError(IdentityError error) => error.Code switch
     {
-        "PasswordTooShort" => "A senha precisa ter pelo menos 8 caracteres.",
+        "PasswordTooShort" => $"A senha precisa ter pelo menos {IdentityModuleExtensions.MinPasswordLength} caracteres.",
         "PasswordRequiresDigit" => "A senha precisa ter ao menos um numero.",
         "PasswordRequiresUpper" => "A senha precisa ter ao menos uma letra maiuscula.",
         "PasswordRequiresLower" => "A senha precisa ter ao menos uma letra minuscula.",
