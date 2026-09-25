@@ -39,7 +39,7 @@ Regras que nao dependem de script:
 - **Nunca rode `dotnet ef database update` contra producao** da maquina local: o banco de producao
   so muda pelo deploy (`Database__MigrateOnStartup=true`), o que deixa rastro e ordem garantida.
 - **Segredo so em variavel do Railway.** Se precisar gerar: `openssl rand -base64 48` (JWT) e
-  `openssl rand -base64 18` (convite). Nunca escreva o valor em arquivo do repositorio, que e publico.
+  `openssl rand -hex 12` (convite, facil de digitar). Nunca escreva o valor em arquivo do repositorio, que e publico.
 
 ## Primeiro deploy
 
@@ -52,6 +52,8 @@ entre elas. Os pontos onde as pessoas erram:
    Directory errado (tem de ser `web`).
 4. Definir `TEST_TODAY` ou `ASPNETCORE_ENVIRONMENT` no Railway (nao defina; o Dockerfile fixa
    Production).
+5. Esquecer `PORT=8080`: o Railway injeta uma porta propria, a API escuta nela, e o dominio gerado
+   para 8080 responde 502.
 
 ## Depois de subir: verificacao
 

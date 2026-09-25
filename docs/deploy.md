@@ -32,7 +32,7 @@ Railway le o banco inteiro.
 
 ```bash
 openssl rand -base64 48   # -> Jwt__SigningKey (assina os tokens de acesso)
-openssl rand -base64 18   # -> Registration__InviteCode (codigo de convite)
+openssl rand -hex 12      # -> Registration__InviteCode (codigo de convite; hex e facil de digitar no celular)
 ```
 
 Guarde os dois num gerenciador de senhas. Eles vao **somente** para as variaveis do Railway.
@@ -58,6 +58,7 @@ Guarde os dois num gerenciador de senhas. Eles vao **somente** para as variaveis
    | `Registration__InviteCode` | o segundo valor do passo 1 |
    | `Registration__MaxUsers` | `10` |
    | `Database__MigrateOnStartup` | `true` |
+   | `PORT` | `8080` (fixa a porta; sem isso o Railway injeta outra e o dominio pode apontar para a errada) |
 
    **Nao** defina `TEST_TODAY`, `ASPNETCORE_ENVIRONMENT` nem `Cors__AllowedOrigin`. O Dockerfile
    ja fixa `Production`, e em Production o `TEST_TODAY` e ignorado de qualquer forma.
