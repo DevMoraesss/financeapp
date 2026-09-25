@@ -41,9 +41,12 @@ responde **404** (não 403 - 403 confirmaria que o id existe). É o requisito US
 Fluxo: `register` -> `login` -> usa o **access token** (15 min, guardado em memória na SPA) -> quando
 expira, `refresh` (refresh token de 7 dias em cookie `httpOnly`, **rotacionado** a cada uso).
 
+Em produção a SPA e a API respondem na **mesma origem**: a Vercel repassa `/api/*` para o Railway
+(ADR-002). Por isso o cookie é `SameSite=Strict` e não há CORS.
+
 | Método | Rota | Auth | Descrição |
 |---|---|---|---|
-| POST | `/auth/register` | anônima | cria usuário + dispara seed de categorias |
+| POST | `/auth/register` | anônima | cria usuário + dispara seed de categorias (exige convite, ver abaixo) |
 | POST | `/auth/login` | anônima | devolve access token (+ cookie de refresh) |
 | POST | `/auth/refresh` | cookie | rotaciona e devolve novo access token |
 | POST | `/auth/logout` | bearer | revoga o refresh token atual |
@@ -54,12 +57,20 @@ expira, `refresh` (refresh token de 7 dias em cookie `httpOnly`, **rotacionado**
 ### POST /auth/register
 
 ```jsonc
-// Request
-{ "name": "Juan", "email": "juan@exemplo.com", "password": "umaSenhaBoa123" }
+// Request - senha de 12 a 128 caracteres
+{ "name": "Juan", "email": "juan@exemplo.com", "password": "umaSenhaBoa123", "inviteCode": "..." }
 
 // 201 Created
 { "id": "0192f3a1-...", "name": "Juan", "email": "juan@exemplo.com" }
+
+// 403 - type .../registration-closed : servidor sem código de convite e sem cadastro aberto
+// 403 - type .../invalid-invite      : código ausente ou errado
+// 403 - type .../user-limit-reached  : Registration:MaxUsers atingido
+// 422 - senha curta, nome vazio, etc.
 ```
+
+O código de convite é conferido **antes** de olhar o e-mail (e em tempo constante): sem o código
+certo a resposta é sempre a mesma, então quem não foi convidado não aprende quem tem conta.
 
 ### POST /auth/login
 
@@ -67,7 +78,7 @@ expira, `refresh` (refresh token de 7 dias em cookie `httpOnly`, **rotacionado**
 // Request
 { "email": "juan@exemplo.com", "password": "umaSenhaBoa123" }
 
-// 200 OK (+ Set-Cookie: refreshToken=...; HttpOnly; Secure; SameSite=None)
+// 200 OK (+ Set-Cookie: refreshToken=...; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth)
 {
   "accessToken": "eyJhbGciOi...",
   "expiresAt": "2026-08-15T18:45:00Z",
@@ -76,6 +87,13 @@ expira, `refresh` (refresh token de 7 dias em cookie `httpOnly`, **rotacionado**
 
 // 401 - credencial inválida OU conta bloqueada por tentativas (mensagem idêntica de propósito)
 ```
+
+### POST /auth/refresh - rotação e reuso
+
+Cada refresh revoga o token usado e emite outro. Apresentar de novo um token já rotacionado é tratado
+como roubo e derruba **todas** as sessões do usuário, **exceto** nos 30 segundos seguintes à rotação:
+duas abas ou várias requisições renovando juntas com o mesmo cookie é corrida normal, não ataque
+(ADR-002, Decisão 3). Token revogado por logout ou troca de senha não tem essa tolerância.
 
 ### 2.1 Respostas deliberadamente "cegas"
 
@@ -122,7 +140,8 @@ validação automática já o produzem). **Mensagens em pt-BR**, porque vão par
 | **404** | não existe **ou não é seu** | id de transação de outro usuário (US-14) |
 | **409** | conflito com o estado atual | pagar fatura já paga; orçamento duplicado; nome de conta repetido |
 | **422** | sintaxe ok, regra de domínio impede | parcelar fora de cartão; categoria de receita numa despesa |
-| **429** | rate limit | 5 tentativas de login por minuto por IP |
+| **429** | rate limit | 10/min por IP em login, cadastro, troca de senha e exclusão; 30/min no refresh; 300/min em qualquer rota. Resposta traz `Retry-After` |
+| **413** | corpo grande demais | requisição acima de 64 KB |
 | **500** | falha inesperada | resposta genérica + `traceId`; **detalhe técnico nunca vai no corpo** |
 
 `traceId` aparece em todas as respostas de erro e nos logs do servidor: é como você liga a reclamação
@@ -366,7 +385,7 @@ Uma chamada só, deliberadamente: o dashboard do protótipo faria 5 requisiçõe
 | GET | `/me` | perfil |
 | PUT | `/me` | altera nome |
 | POST | `/me/change-password` | senha atual + nova |
-| GET | `/me/export` | **US-12** - CSV (UTF-8 com BOM, separador `;`, datas DD/MM/YYYY, valores com vírgula) |
+| GET | `/me/export` | **US-12** - CSV com **todas** as transações (UTF-8 com BOM, separador `;`, datas DD/MM/YYYY, valores com vírgula, coluna `Fatura` MM/AAAA). Texto que começaria com `= + - @` sai com apóstrofo na frente (anti CSV injection) |
 | DELETE | `/me` | **US-13** - hard delete com confirmação |
 
 ```jsonc

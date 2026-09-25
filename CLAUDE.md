@@ -14,6 +14,21 @@ levadas a sério.
 | `docs/modelo-de-dados.md` | Tabelas, tipos, índices; por que decimal, como funciona recorrência e saldo |
 | `docs/api.md` | Contrato dos endpoints e padrão de erro |
 | `docs/fluxos-usuario.md` | Jornadas críticas camada a camada |
+| `docs/ADR-002-deploy-e-seguranca.md` | Vercel + proxy de mesma origem, convite, rate limit, janela do refresh |
+| `docs/deploy.md` | Roteiro de deploy (Railway + Vercel), operação e problemas comuns |
+| `docs/prompts.md` | Prompts prontos para as próximas fases (2FA, patrimônio, investimentos, metas, mercado) |
+
+## Skills do projeto (`.claude/skills/`)
+
+Use a skill certa em vez de improvisar; cada uma carrega o checklist deste repositório.
+
+| Skill | Quando |
+|---|---|
+| `financemove-feature` | Qualquer mudança de comportamento que atravesse API e tela (endpoint novo, campo novo, regra nova) |
+| `financemove-modulo` | Criar um módulo novo no monólito (Goals, Investments, Assets...) |
+| `financemove-seguranca` | Revisar um diff antes de commit/deploy, ou quando mexer em auth, isolamento, cookie, CORS |
+| `financemove-deploy` | Preparar, executar, verificar ou depurar deploy no Railway/Vercel |
+| `financemove-analise` | Analisar os dados financeiros do usuário (fatura, gastos, investimentos, "vale a pena?") |
 
 ## Comandos
 
@@ -26,8 +41,11 @@ docker compose down -v # para E APAGA os dados
 
 # Build e testes
 dotnet build FinanceMove.sln
-dotnet test FinanceMove.sln # unitários + integração
+dotnet test FinanceMove.sln # unitários + integração (Testcontainers: precisa de Docker)
 dotnet test tests/UnitTests # só unitários (rápido, sem Docker)
+
+# Integração SEM Docker: aponte para qualquer Postgres; o fixture cria e apaga um banco descartável
+FINANCEMOVE_TEST_POSTGRES="Host=127.0.0.1;Port=5432;Database=postgres;Username=postgres" dotnet test FinanceMove.sln
 
 # Lint / formatador
 dotnet format FinanceMove.sln # corrige
@@ -114,6 +132,10 @@ web/
   src/lib/                api.ts (contrato tipado), format.ts (pt-BR), contextos
   src/components/         AppLayout, componentes de UI, formularios
   src/pages/              Login, Dashboard, Transactions, Statements, Budget, Settings
+  vercel.json             proxy /api -> Railway, fallback da SPA, cabecalhos de seguranca (CSP)
+Dockerfile, railway.json  imagem e deploy da API no Railway
+.github/workflows/ci.yml  format + build + testes (com Postgres real) + lint + audit + ASCII
+.claude/skills/           skills do projeto (tabela acima)
 ```
 
 Cada modulo e um par de projetos: `X.Contracts` (o que os outros enxergam) e `X` (implementacao
@@ -198,6 +220,38 @@ O `Microsoft.OpenApi` 2.0.0 tem vulnerabilidade alta (GHSA-v5pm-xwqc-g5wc) e a v
 (3.x) quebra o gerador do `Microsoft.AspNetCore.OpenApi` 10.0.5. Volta quando houver endpoints
 para documentar - conferindo as versões compatíveis na ocasião.
 
+### Produção é UMA origem só (não reintroduza CORS nem SameSite=None)
+
+A Vercel serve a SPA e repassa `/api/*` para o Railway (`web/vercel.json`). O cookie de refresh é
+`SameSite=Strict`, `Secure` e `Path=/api/v1/auth`, e o front chama `/api/v1` relativo. Se alguém
+"consertar" um problema pondo a URL do Railway no front, o cookie vira de terceiros e o Safari
+desloga a cada F5. O domínio da API está escrito no `vercel.json`; trocou o domínio, troque lá.
+
+### Cadastro é fechado por padrão
+
+Sem `Registration:InviteCode` e sem `Registration:Open=true`, `/auth/register` responde 403. O
+`appsettings.Development.json` liga `Open`; produção usa convite + `Registration:MaxUsers`. Teste ou
+script que cria usuário fora de Development precisa mandar `inviteCode`.
+
+### Refresh token: rotação atômica + janela de 30 s
+
+Não "simplifique" o `AuthService.RefreshAsync`. A revogação é condicional (só uma requisição
+rotaciona) e o token recém-rotacionado vale por 30 s, porque abas e requisições paralelas renovam
+com o mesmo cookie. Sem isso o usuário era deslogado a cada 15 minutos (bug medido, ADR-002). No
+front, `refreshSession()` em `api.ts` garante uma renovação por vez; toda chamada autenticada passa
+por ele.
+
+### Config lida antes do `Build()` não vê o override dos testes
+
+O `Program.cs` lê a connection string antes do `builder.Build()`. Nos testes, por isso, ela vai via
+`UseSetting` (ver `PostgresFixture.CreateFactory`). Opção nova que o teste precise trocar: leia via
+`IOptions` na hora de usar, não num retrato tirado no registro (é o que o `RateLimiting.cs` faz).
+
+### Uma réplica só
+
+As migrations rodam no startup (`Database:MigrateOnStartup`) e o catch-up de recorrência usa cache
+em memória. Os dois pressupõem uma instância (`numReplicas: 1` no `railway.json`).
+
 ### Teste de integração usa Postgres de verdade
 
 Nada de banco em memória: dependemos de `numeric(14,2)`, CHECK constraints, índice único parcial e
@@ -211,6 +265,10 @@ Nada de banco em memória: dependemos de `numeric(14,2)`, CHECK constraints, ín
   não valores reais.
 - `appsettings.Development.json` tem credencial **local** do docker-compose, que não vale nada
   fora da sua máquina. Produção só por variável de ambiente (Railway).
+- **O repositório é público.** A chave que esteve no `.env.example` no commit `64b5f57` está no
+  histórico para sempre: nunca a use em lugar nenhum.
+- Dado financeiro real do usuário (CSV exportado, extrato) fica em `dados-pessoais/`, que está no
+  `.gitignore`. Nunca em outro lugar do repositório.
 
 ## Definição de pronto
 
@@ -220,4 +278,8 @@ Antes de considerar qualquer tarefa concluída:
 dotnet format FinanceMove.sln --verify-no-changes # exit 0
 dotnet build FinanceMove.sln # 0 erros, 0 avisos
 dotnet test FinanceMove.sln # tudo verde
+node tools/clean-chars.mjs --check # só ASCII em pontuação
+cd web && npm run build && npm run lint # se mexeu no front
 ```
+
+O CI (`.github/workflows/ci.yml`) roda tudo isso a cada push; um push vermelho não está pronto.
