@@ -1,14 +1,38 @@
-import { ArrowDownRight, ArrowUpRight, Check, Wallet, X } from 'lucide-react'
+import { ArrowDownRight, ArrowUpRight, Check, CreditCard, Wallet, X } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts'
 import { Card, EmptyState, ErrorState, Loading, StatCard } from '../components/ui'
-import { endpoints } from '../lib/api'
-import { formatDate, formatMoney, formatPercent, formatSigned } from '../lib/format'
+import { endpoints, type StatementStatus } from '../lib/api'
+import {
+  accountTypeLabel,
+  formatDate,
+  formatMoney,
+  formatPercent,
+  formatSigned,
+  formatStatementMonth,
+} from '../lib/format'
 import { useApi } from '../lib/useApi'
 import { useMonth } from '../lib/MonthContext'
+
+const STATEMENT_LABEL: Record<StatementStatus, string> = {
+  open: 'aberta',
+  closed: 'fechada, a pagar',
+  paid: 'paga',
+}
 
 export function Dashboard() {
   const { month } = useMonth()
   const state = useApi(() => endpoints.dashboard(month), [month])
+
+  // Filtrar por tipo e so escolher o que mostrar; nenhum valor e somado aqui.
+  const debitAccounts =
+    state.status === 'ready' ? state.data.accounts.filter((account) => account.type !== 'credit_card') : []
+
+  // Os fallbacks cobrem a janela do deploy em que a Vercel ja publicou este front e o Railway
+  // ainda roda a API anterior, que nao manda os campos separados.
+  const cards = state.status === 'ready' ? (state.data.cards ?? []) : []
+  const accountsBalance = state.status === 'ready' ? (state.data.accountsBalance ?? state.data.totalBalance) : 0
+  const cardsOwed = state.status === 'ready' ? (state.data.cardsOwed ?? 0) : 0
 
   async function confirm(id: string) {
     await endpoints.confirmTransaction(id)
@@ -32,12 +56,21 @@ export function Dashboard() {
 
       {state.status === 'ready' && (
         <>
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {/* Debito e credito separados: o limite do cartao nao e dinheiro, e a divida do cartao
+                nao se mistura com o saldo das contas (decidido com o usuario em 25/09/2026). */}
             <StatCard
-              label="Saldo total"
-              value={formatMoney(state.data.totalBalance)}
-              hint="Soma das suas contas"
+              label="Saldo em contas"
+              value={formatMoney(accountsBalance)}
+              hint="Corrente, poupanca e dinheiro (debito)"
               icon={<Wallet className="size-4 text-brand" />}
+            />
+            <StatCard
+              label="Cartoes a pagar"
+              value={formatMoney(cardsOwed)}
+              hint="Tudo que ja foi comprado no credito, inclusive parcelas futuras"
+              tone={cardsOwed > 0 ? 'expense' : 'neutral'}
+              icon={<CreditCard className="size-4 text-expense" />}
             />
             <StatCard
               label="Receitas do mes"
@@ -48,14 +81,86 @@ export function Dashboard() {
             <StatCard
               label="Despesas do mes"
               value={formatMoney(state.data.month.expenses)}
-              hint={`Saldo do mes: ${formatMoney(state.data.month.balance)}`}
+              hint={`Saldo do mes: ${formatMoney(state.data.month.balance)}. Cartao conta no mes da fatura.`}
               tone="expense"
               icon={<ArrowDownRight className="size-4 text-expense" />}
             />
           </div>
 
           <div className="grid gap-4 lg:grid-cols-2">
-            <Card title="Despesas por categoria" subtitle="Mes atual">
+            <Card title="Contas" subtitle="Debito: o dinheiro que voce tem">
+              {debitAccounts.length === 0 ? (
+                <EmptyState
+                  title="Nenhuma conta de debito"
+                  description="Cadastre sua conta corrente em Configuracoes."
+                />
+              ) : (
+                <ul className="divide-y divide-line">
+                  {debitAccounts.map((account) => (
+                    <li key={account.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
+                      <div className="min-w-0">
+                        <p className="truncate text-ink">{account.name}</p>
+                        <p className="text-xs text-ink-faint">{accountTypeLabel(account.type)}</p>
+                      </div>
+                      <span
+                        className={`tabular font-medium ${account.currentBalance < 0 ? 'text-expense' : 'text-ink'}`}
+                      >
+                        {formatMoney(account.currentBalance)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+
+            <Card
+              title="Cartoes de credito"
+              subtitle="Credito: o que voce deve"
+              action={
+                <Link to="/faturas" className="text-sm text-brand hover:underline">
+                  Ver faturas
+                </Link>
+              }
+            >
+              {cards.length === 0 ? (
+                <EmptyState
+                  title="Nenhum cartao cadastrado"
+                  description="Cadastre seu cartao em Configuracoes, com o dia de fechamento e o de vencimento."
+                />
+              ) : (
+                <ul className="divide-y divide-line">
+                  {cards.map((card) => (
+                    <li key={card.id} className="space-y-1 py-2.5 text-sm">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="truncate font-medium text-ink">{card.name}</p>
+                        <span className="tabular font-medium text-expense">{formatMoney(card.owed)}</span>
+                      </div>
+                      {card.currentStatement && (
+                        <div className="flex items-center justify-between gap-3 text-xs text-ink-faint">
+                          <span>
+                            Fatura {formatStatementMonth(card.currentStatement.month)} -{' '}
+                            {STATEMENT_LABEL[card.currentStatement.status]} - vence{' '}
+                            {formatDate(card.currentStatement.dueDate)}
+                          </span>
+                          <span className="tabular text-ink-muted">
+                            {formatMoney(card.currentStatement.total)}
+                          </span>
+                        </div>
+                      )}
+                      <p className="text-xs text-ink-faint">
+                        {card.availableLimit != null && card.creditLimit != null
+                          ? `Limite disponivel ${formatMoney(card.availableLimit)} de ${formatMoney(card.creditLimit)}`
+                          : 'O total a pagar inclui as parcelas futuras'}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card title="Despesas por categoria" subtitle="Mes selecionado (cartao pelo mes da fatura)">
               {state.data.expensesByCategory.length === 0 ? (
                 <EmptyState
                   title="Nenhuma despesa neste mes"

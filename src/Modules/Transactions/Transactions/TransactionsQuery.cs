@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using FinanceMove.Modules.Accounts.Contracts;
 using FinanceMove.Modules.Transactions.Contracts;
 using FinanceMove.Shared;
@@ -23,6 +24,14 @@ internal sealed class TransactionsQuery(
     {
         var accounts = await accountsQuery.ListAsync(userId, includeArchived: true, cancellationToken);
 
+        // Cartao e divida, nao dinheiro: o saldo dele e tudo que foi comprado e ainda nao foi pago,
+        // INCLUSIVE as parcelas futuras (e o "limite utilizado" que o banco mostra). Nas contas,
+        // lancamento com data futura ainda nao aconteceu e fica de fora (SPEC secao 5.1).
+        var cardIds = accounts
+            .Where(account => account.Type == AccountType.CreditCard)
+            .Select(account => account.Id)
+            .ToList();
+
         // Duas agregacoes no banco em vez de trazer as linhas para a memoria. A primeira cobre a
         // conta de origem (receita entra, despesa e transferencia saem); a segunda cobre a ponta
         // que recebe a transferencia.
@@ -30,7 +39,7 @@ internal sealed class TransactionsQuery(
             .AsNoTracking()
             .Where(transaction => transaction.UserId == userId
                 && transaction.Status == TransactionStatus.Confirmed
-                && transaction.Date <= asOf)
+                && (transaction.Date <= asOf || cardIds.Contains(transaction.AccountId)))
             .GroupBy(transaction => transaction.AccountId)
             .Select(group => new
             {
@@ -44,8 +53,8 @@ internal sealed class TransactionsQuery(
             .AsNoTracking()
             .Where(transaction => transaction.UserId == userId
                 && transaction.Status == TransactionStatus.Confirmed
-                && transaction.Date <= asOf
-                && transaction.DestinationAccountId != null)
+                && transaction.DestinationAccountId != null
+                && (transaction.Date <= asOf || cardIds.Contains(transaction.DestinationAccountId.Value)))
             .GroupBy(transaction => transaction.DestinationAccountId!.Value)
             .Select(group => new { AccountId = group.Key, Amount = group.Sum(transaction => transaction.Amount) })
             .ToDictionaryAsync(row => row.AccountId, row => row.Amount, cancellationToken);
@@ -75,17 +84,14 @@ internal sealed class TransactionsQuery(
         string month,
         CancellationToken cancellationToken = default)
     {
-        var (from, to) = MonthRange.Parse(month);
-
         // Transferencia nao entra: mover dinheiro entre contas proprias nao e receita nem
-        // despesa, senao o relatorio mentiria (SPEC D6).
+        // despesa, senao o relatorio mentiria (SPEC D6). Despesa de cartao conta no mes da fatura.
         var totals = await context.Transactions
             .AsNoTracking()
             .Where(transaction => transaction.UserId == userId
                 && transaction.Status == TransactionStatus.Confirmed
-                && transaction.Date >= from
-                && transaction.Date <= to
                 && transaction.Type != TransactionType.Transfer)
+            .Where(MonthRange.ReferenceFilter(month))
             .GroupBy(transaction => transaction.Type)
             .Select(group => new { Type = group.Key, Amount = group.Sum(transaction => transaction.Amount) })
             .ToListAsync(cancellationToken);
@@ -101,16 +107,13 @@ internal sealed class TransactionsQuery(
         string month,
         CancellationToken cancellationToken = default)
     {
-        var (from, to) = MonthRange.Parse(month);
-
         var rows = await context.Transactions
             .AsNoTracking()
             .Where(transaction => transaction.UserId == userId
                 && transaction.Status == TransactionStatus.Confirmed
                 && transaction.Type == TransactionType.Expense
-                && transaction.Date >= from
-                && transaction.Date <= to
                 && transaction.CategoryId != null)
+            .Where(MonthRange.ReferenceFilter(month))
             .GroupBy(transaction => new { transaction.CategoryId, transaction.Category!.Name, transaction.Category.Color })
             .Select(group => new
             {
@@ -148,12 +151,16 @@ internal sealed class TransactionsQuery(
     public async Task<IReadOnlyList<TransactionDto>> GetRecentAsync(
         Guid userId,
         int count,
+        DateOnly asOf,
         CancellationToken cancellationToken = default)
     {
+        // "Ultimas" e o que ja aconteceu: parcela de novembro nao e uma transacao recente.
         var transactions = await context.Transactions
             .AsNoTracking()
             .Include(transaction => transaction.Category)
-            .Where(transaction => transaction.UserId == userId && transaction.Status == TransactionStatus.Confirmed)
+            .Where(transaction => transaction.UserId == userId
+                && transaction.Status == TransactionStatus.Confirmed
+                && transaction.Date <= asOf)
             .OrderByDescending(transaction => transaction.Date)
             .ThenByDescending(transaction => transaction.CreatedAt)
             .Take(count)
@@ -218,5 +225,28 @@ internal static class MonthRange
         var from = new DateOnly(year, monthNumber, 1);
         range = (from, from.AddMonths(1).AddDays(-1));
         return true;
+    }
+
+    /// <summary>
+    /// Lancamentos que pertencem ao mes: despesa de cartao pelo mes da FATURA (quando o dinheiro
+    /// sai), todo o resto pela data (SPEC secao 5.3, revista em 25/09/2026).
+    /// </summary>
+    /// <remarks>
+    /// Compra de 14/08 em 3x num cartao que vence dia 10: as parcelas contam em setembro, outubro e
+    /// novembro, e nao em agosto. O pagamento da fatura e transferencia, entao nao conta de novo.
+    /// E a mesma regra no resumo do mes, no grafico por categoria, no orcamento e na lista.
+    /// </remarks>
+    public static Expression<Func<Transaction, bool>> ReferenceFilter(string month)
+    {
+        var (from, to) = Parse(month);
+        var key = $"{from.Year:D4}-{from.Month:D2}";
+
+        return transaction =>
+            (transaction.Type == TransactionType.Expense
+                && transaction.StatementMonth != null
+                && transaction.StatementMonth == key)
+            || ((transaction.Type != TransactionType.Expense || transaction.StatementMonth == null)
+                && transaction.Date >= from
+                && transaction.Date <= to);
     }
 }

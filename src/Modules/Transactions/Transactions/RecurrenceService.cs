@@ -176,6 +176,11 @@ internal sealed class RecurrenceService(
             return 0;
         }
 
+        // Recorrencia em cartao (assinatura, streaming) precisa cair na fatura certa, como qualquer
+        // compra no cartao. Sem isto ela nascia sem fatura e sumia da tela de Faturas.
+        var accounts = (await accountsQuery.ListAsync(userId, includeArchived: true, cancellationToken))
+            .ToDictionary(account => account.Id);
+
         var created = 0;
 
         foreach (var rule in due)
@@ -205,6 +210,7 @@ internal sealed class RecurrenceService(
                     AccountId = rule.AccountId,
                     CategoryId = rule.CategoryId,
                     RecurrenceRuleId = rule.Id,
+                    StatementMonth = StatementMonthFor(accounts.GetValueOrDefault(rule.AccountId), rule.Type, rule.NextRunOn),
                     CreatedAt = clock.UtcNow,
                     UpdatedAt = clock.UtcNow,
                 });
@@ -224,6 +230,11 @@ internal sealed class RecurrenceService(
 
         return created;
     }
+
+    private static string? StatementMonthFor(AccountSummary? account, CategoryKind type, DateOnly date) =>
+        account is { Type: AccountType.CreditCard, ClosingDay: { } closing, DueDay: { } due } && type == CategoryKind.Expense
+            ? CardCycle.StatementMonthFor(closing, due, date)
+            : null;
 
     private static void ValidateSchedule(CreateRecurrenceRequest request)
     {

@@ -193,10 +193,17 @@ export type Account = {
   name: string
   type: AccountType
   initialBalance: number
-  /** Ja calculado pelo servidor (SPEC secao 5.1). A UI nunca soma transacoes. */
+  /**
+   * Ja calculado pelo servidor (SPEC secao 5.1). A UI nunca soma transacoes. Em cartao e a divida
+   * (negativo), incluindo parcelas futuras.
+   */
   currentBalance: number
   closingDay?: number | null
   dueDay?: number | null
+  /** So cartao. Informativo: nunca entra em saldo. */
+  creditLimit?: number | null
+  /** Limite menos o que ja foi comprado e nao pago. Calculado no servidor. */
+  availableLimit?: number | null
   archived: boolean
 }
 
@@ -227,9 +234,26 @@ export type Transaction = {
 
 export type MonthSummary = { income: number; expenses: number; balance: number }
 
+export type CardOverview = {
+  id: string
+  name: string
+  /** Tudo que foi comprado e nao pago, inclusive parcelas futuras (numero positivo). */
+  owed: number
+  creditLimit: number | null
+  availableLimit: number | null
+  /** A proxima fatura a pagar: a fechada mais antiga ainda nao paga, ou a aberta. */
+  currentStatement: Statement | null
+}
+
 export type Dashboard = {
+  /** Soma das contas de debito (corrente, poupanca, dinheiro). Cartao nao entra. */
+  accountsBalance: number
+  /** Soma do que se deve em todos os cartoes, inclusive parcelas futuras. */
+  cardsOwed: number
+  /** Contas menos cartoes. Mantido no contrato; a tela mostra os dois separados. */
   totalBalance: number
   accounts: Array<{ id: string; name: string; type: AccountType; currentBalance: number }>
+  cards: CardOverview[]
   month: MonthSummary
   expensesByCategory: Array<{
     categoryId: string
@@ -328,6 +352,7 @@ export const endpoints = {
     initialBalance: number
     closingDay?: number | null
     dueDay?: number | null
+    creditLimit?: number | null
   }) => api.post<Account>('/accounts', body),
   archiveAccount: (id: string) => api.post<void>(`/accounts/${id}/archive`),
   adjustBalance: (id: string, realBalance: number) =>

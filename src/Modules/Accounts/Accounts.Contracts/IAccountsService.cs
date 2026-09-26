@@ -1,13 +1,19 @@
 namespace FinanceMove.Modules.Accounts.Contracts;
 
+/// <param name="InitialBalance">
+/// Em conta: quanto tem hoje. Em cartao: quanto ja deve fora dos lancamentos que vai registrar,
+/// entao zero ou negativo. O limite do cartao vai em <paramref name="CreditLimit"/>, nunca aqui.
+/// </param>
 public sealed record CreateAccountRequest(
     string Name,
     AccountType Type,
     decimal InitialBalance,
     short? ClosingDay,
-    short? DueDay);
+    short? DueDay,
+    decimal? CreditLimit = null);
 
-public sealed record UpdateAccountRequest(string Name, short? ClosingDay, short? DueDay);
+/// <remarks>PUT substitui: sem <paramref name="CreditLimit"/>, o limite fica vazio.</remarks>
+public sealed record UpdateAccountRequest(string Name, short? ClosingDay, short? DueDay, decimal? CreditLimit = null);
 
 /// <summary>
 /// Operacoes de escrita sobre contas. A leitura de saldo NAO esta aqui: quem calcula saldo e o

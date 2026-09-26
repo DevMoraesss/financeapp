@@ -15,6 +15,16 @@ internal sealed class AccountsService(AccountsDbContext context, IClock clock) :
         await EnsureUniqueNameAsync(userId, name, exceptId: null, cancellationToken);
 
         ValidateCycle(request.Type, request.ClosingDay, request.DueDay);
+        var creditLimit = ValidateCreditLimit(request.Type, request.CreditLimit);
+
+        if (request.Type == AccountType.CreditCard && request.InitialBalance > 0m)
+        {
+            // Foi exatamente o erro que aconteceu em producao: o limite digitado como saldo inicial
+            // virava dinheiro e inflava o saldo total. Saldo de cartao e divida: zero ou negativo.
+            throw DomainException.Unprocessable(
+                "O saldo inicial do cartao e o que voce ja deve nele: zero ou negativo. O limite vai no campo Limite.",
+                "card-positive-initial-balance");
+        }
 
         var account = new Account
         {
@@ -25,6 +35,7 @@ internal sealed class AccountsService(AccountsDbContext context, IClock clock) :
             InitialBalance = Money.Round(request.InitialBalance),
             ClosingDay = request.Type == AccountType.CreditCard ? request.ClosingDay : null,
             DueDay = request.Type == AccountType.CreditCard ? request.DueDay : null,
+            CreditLimit = creditLimit,
             Archived = false,
             CreatedAt = clock.UtcNow,
             UpdatedAt = clock.UtcNow,
@@ -51,6 +62,7 @@ internal sealed class AccountsService(AccountsDbContext context, IClock clock) :
         }
 
         ValidateCycle(account.Type, request.ClosingDay, request.DueDay);
+        var creditLimit = ValidateCreditLimit(account.Type, request.CreditLimit);
 
         var name = RequireName(request.Name);
         await EnsureUniqueNameAsync(userId, name, exceptId: accountId, cancellationToken);
@@ -58,6 +70,7 @@ internal sealed class AccountsService(AccountsDbContext context, IClock clock) :
         account.Name = name;
         account.ClosingDay = account.Type == AccountType.CreditCard ? request.ClosingDay : null;
         account.DueDay = account.Type == AccountType.CreditCard ? request.DueDay : null;
+        account.CreditLimit = creditLimit;
         account.UpdatedAt = clock.UtcNow;
 
         await context.SaveChangesAsync(cancellationToken);
@@ -84,6 +97,27 @@ internal sealed class AccountsService(AccountsDbContext context, IClock clock) :
             .ExecuteDeleteAsync(cancellationToken);
 
         return affected > 0;
+    }
+
+    /// <summary>Limite so faz sentido em cartao, e nunca negativo. O CHECK do banco repete a regra.</summary>
+    private static decimal? ValidateCreditLimit(AccountType type, decimal? creditLimit)
+    {
+        if (creditLimit is null)
+        {
+            return null;
+        }
+
+        if (type != AccountType.CreditCard)
+        {
+            throw DomainException.Unprocessable("Limite so existe em cartao de credito.", "credit-limit-only-card");
+        }
+
+        if (creditLimit < 0m)
+        {
+            throw DomainException.Unprocessable("O limite do cartao nao pode ser negativo.", "invalid-credit-limit");
+        }
+
+        return Money.Round(creditLimit.Value);
     }
 
     /// <summary>Nome obrigatorio e dentro do tamanho da coluna (varchar 60).</summary>
@@ -160,5 +194,6 @@ internal sealed class AccountsService(AccountsDbContext context, IClock clock) :
         account.InitialBalance,
         account.ClosingDay,
         account.DueDay,
-        account.Archived);
+        account.Archived,
+        account.CreditLimit);
 }

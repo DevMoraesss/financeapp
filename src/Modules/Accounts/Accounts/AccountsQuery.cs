@@ -47,5 +47,6 @@ internal sealed class AccountsQuery(AccountsDbContext context) : IAccountsQuery
         account.InitialBalance,
         account.ClosingDay,
         account.DueDay,
-        account.Archived);
+        account.Archived,
+        account.CreditLimit);
 }

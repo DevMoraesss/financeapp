@@ -44,6 +44,7 @@ Registradas para o "eu do futuro" não reabrir discussão sem motivo novo.
 | D8 | **Parcelamento na v1, versão simples:** lançar em Nx cria as N transações de uma vez, ligadas por grupo. | Com fatura na v1, fatura sem parcela não representa a fatura real de quase ninguém no Brasil. A versão simples é barata (um loop). |
 | D9 | **Valores monetários (revisto em 15/08/2026): `decimal` no C# <-> `numeric(14,2)` no Postgres. Nunca float. Arredondamento sempre explícito (`AwayFromZero`). Ver ADR-001, Decisão 3.** | Float é base 2 e não representa 0,1 com exatidão (`0.1 + 0.2 !== 0.3`); `decimal`/`numeric` são base 10, exatos. Com backend C#, `decimal` é o padrão do mercado financeiro .NET e elimina a conversão /100 dos centavos-int em toda borda. |
 | D10 | **Importação CSV/OFX, Metas e Investimentos: v2** (ver secao 5). | Cada um é um subsistema. A v1 já assumiu fatura + recorrência + parcelas; esses são os cortes mais seguros. |
+| D12 | **Cartão (revisto em 25/09/2026, com dados reais em produção): (a) despesa no cartão conta no mês da FATURA (quando vence), inclusive cada parcela; (b) o saldo do cartão é tudo que foi comprado e não pago, inclusive parcelas futuras; (c) o limite é um campo próprio e nunca entra em saldo; (d) o dashboard separa contas (débito) de cartões (crédito).** | O usuário pensa no gasto pelo que sai do bolso no mês: compra de agosto parcelada não é gasto de agosto. O limite digitado no "saldo inicial" do cartão virava dinheiro e inflava o saldo total (bug de formulário visto em produção). A dívida do cartão, como no banco, já inclui as parcelas compradas. Substitui o "regime de competência" da secao 5.3 para cartão. |
 | D11 | **LGPD na v1: exclusão de conta (hard delete) + export de dados.** Política de privacidade e backup testado são **pré-requisitos do portão de abertura pública** (secao 9.4), não da v1. | Exclusão e portabilidade são direitos do titular; implementar depois é pior. Política/backup só se tornam críticos quando entram desconhecidos. |
 
 ---
@@ -59,7 +60,7 @@ Registradas para o "eu do futuro" não reabrir discussão sem motivo novo.
 - **Recorrência**: regras mensais/semanais/anuais que geram transações pendentes no vencimento (D7).
 - **Categorias**: seed padrão no cadastro, criar/renomear/arquivar. Sem subcategorias.
 - **Orçamento**: limite mensal por categoria de despesa, barra de progresso do mês corrente.
-- **Dashboard reduzido**: saldo total e por conta, receitas x despesas do mês, donut de despesas por categoria do mês, últimas transações.
+- **Dashboard reduzido**: saldo em contas (débito) e cartões a pagar (crédito), separados e por conta/cartão, receitas x despesas do mês, donut de despesas por categoria do mês, últimas transações.
 - **LGPD**: excluir minha conta (hard delete de tudo) e exportar meus dados (CSV).
 
 ### Fora (v2/v3 - registrado para o modelo de dados não fechar portas)
@@ -85,9 +86,10 @@ Todas as regras abaixo valem **por usuário** - nenhuma query cruza dados de usu
 ### 5.1 Contas e saldo
 
 - Tipos: `corrente`, `poupanca`, `dinheiro`, `cartao_credito`.
-- Toda conta tem `saldo_inicial` (pode ser negativo) definido na criação.
+- Toda conta tem `saldo_inicial` (pode ser negativo) definido na criação. Em cartão, o saldo inicial é o que já se devia fora dos lançamentos registrados: **zero ou negativo** (positivo é recusado). O limite do cartão é um campo à parte, informativo, que **nunca** entra em saldo (D12).
 - **Saldo atual (derivado)** = `saldo_inicial` + soma transações da conta com `status = confirmada` **e** `data <= hoje`.
-  - Transações `pendentes` (recorrência não confirmada) e parcelas com data futura **não** entram no saldo atual.
+  - Transações `pendentes` (recorrência não confirmada) **não** entram no saldo atual; lançamento com data futura numa conta de débito também não (ainda não aconteceu).
+  - **Cartão de crédito (D12):** o saldo é a dívida, então entram **todas** as compras confirmadas, inclusive parcelas com data futura (é o "limite utilizado" do banco). Limite disponível = limite - dívida.
   - Em transferências: valor sai da conta de origem e entra na de destino.
 - **Ajuste de saldo**: usuário informa o saldo real do banco; o sistema cria uma transação (receita ou despesa, conforme o sinal da diferença) na categoria de sistema "Ajuste", com a data de hoje. O histórico nunca é reescrito.
 - Conta com transações não pode ser excluída - só **arquivada** (sai dos formulários; histórico e relatórios intactos).
@@ -115,14 +117,14 @@ Todas as regras abaixo valem **por usuário** - nenhuma query cruza dados de usu
   - `dia_vencimento = dia_fechamento` é rejeitado no cadastro (ciclo ambíguo).
 - Status derivado da fatura: `aberta` (hoje <= fechamento), `fechada` (hoje > fechamento e não paga), `paga` (existe transferência de pagamento apontando para ela).
 - **Pagar fatura**: cria uma transferência `conta escolhida -> cartão` no valor **total** da fatura, com o campo `fatura_mes = AAAA-MM`. Pagamento parcial não existe na v1 (D5); juros que o banco cobrar são lançados pelo usuário como despesa comum.
-- Regime de **competência**: a despesa conta no relatório/orçamento pelo mês da **data da compra**, não do pagamento da fatura (o pagamento é transferência e não conta como despesa).
+- **Mês da fatura (D12, revisto em 25/09/2026):** despesa no cartão conta no relatório, no dashboard, no orçamento e na lista do mês pelo mês em que a **fatura vence** (quando o dinheiro sai), não pela data da compra. Compra de 14/08 num cartão que vence dia 10 conta em setembro. O pagamento da fatura é transferência e não conta de novo. Os demais lançamentos contam pela data.
 
 ### 5.4 Parcelamento
 
 - Ao lançar despesa parcelada ("R$ 3.600,00 em 12x"), o sistema cria as N transações de uma vez:
   - Cada parcela com `valor = total / N`, arredondado a 2 casas com o resto distribuído nas primeiras parcelas - R$ 33,34 + R$ 33,33 + R$ 33,33 para R$ 100,00 em 3x - garantindo soma parcelas = total ao centavo.
   - Parcela `k` tem data = data da compra + (k-1) meses; a descrição exibe `k/N` ("Notebook 3/12").
-  - Todas ligadas por `grupo_parcelamento_id`; status `confirmada` (contam no saldo/fatura quando a data chega).
+  - Todas ligadas por `grupo_parcelamento_id`; status `confirmada`. Todas entram na dívida do cartão desde a compra; nas despesas e no orçamento, cada uma conta no mês da sua fatura (D12).
 - Excluir o grupo remove as parcelas com data futura; as passadas ficam (foram fato).
 - Parcelamento só em cartão de crédito na v1. Editar série (mudar valor de todas) é v2 - na v1 edita-se parcela a parcela.
 
@@ -160,8 +162,9 @@ Como visitante, quero criar conta com e-mail/senha para ter meu espaço financei
 
 **US-02 - Criar conta financeira**
 Como usuário, quero cadastrar minhas contas (corrente, poupança, dinheiro, cartão) com saldo inicial.
-- Dado o formulário, quando escolho tipo `cartao_credito`, então os campos `dia_fechamento` e `dia_vencimento` (1-28) tornam-se obrigatórios; para os demais tipos, não existem.
-- Dado que crio "Corrente" com saldo inicial R$ 1.000,00, então o dashboard mostra saldo total R$ 1.000,00.
+- Dado o formulário, quando escolho tipo `cartao_credito`, então os campos `dia_fechamento` e `dia_vencimento` (1-28) tornam-se obrigatórios e aparece "Limite (opcional)" no lugar de "Saldo inicial"; para os demais tipos, não existem.
+- Dado que crio "Corrente" com saldo inicial R$ 1.000,00, então o dashboard mostra saldo em contas R$ 1.000,00.
+- Dado que crio um cartão com limite R$ 5.000,00, então o saldo em contas não muda e o cartão mostra limite disponível R$ 5.000,00. Saldo inicial positivo em cartão é recusado (422).
 - Dado uma conta com transações, quando tento excluí-la, então só me é oferecido arquivar; arquivada, ela sai dos formulários de lançamento mas segue nos relatórios.
 
 **US-03 - Lançar despesa/receita**
@@ -184,7 +187,7 @@ Como usuário de cartão, quero ver minhas compras agrupadas na fatura certa e p
 **US-06 - Compra parcelada**
 Como usuário, quero lançar "R$ 300,00 em 3x" e ver cada parcela na fatura certa.
 - Dado o lançamento em 14/08 num cartão que fecha dia 03, então existem 3 transações de R$ 100,00 ("Fone 1/3" 14/08 -> fatura 09/2026; "2/3" 14/09 -> fatura 10/2026; "3/3" 14/10 -> fatura 11/2026).
-- O saldo atual do cartão reflete só as parcelas com data <= hoje.
+- A dívida do cartão inclui as 3 parcelas desde a compra (R$ 300,00 a pagar); nas despesas do mês, cada parcela conta no mês da sua fatura: setembro, outubro e novembro (D12).
 - Quando excluo o grupo em 20/08, então as parcelas 2/3 e 3/3 (futuras) somem e a 1/3 permanece.
 - Total que não divide exato (R$ 100,00 em 3x) distribui o resto nas primeiras parcelas e a soma bate o total ao centavo.
 
@@ -204,12 +207,12 @@ Como usuário, quero adaptar as categorias à minha vida.
 **US-09 - Orçamento**
 Como usuário, quero limitar meu gasto mensal por categoria e ver o quanto já usei.
 - Dado limite "Mercado: R$ 600,00", quando tenho R$ 150,00 gastos em Mercado no mês, então a barra mostra 25% (R$ 150,00 de R$ 600,00).
-- Transferências e transações pendentes não contam; despesas de cartão contam pelo mês da compra.
+- Transferências e transações pendentes não contam; despesas de cartão contam pelo mês da fatura (D12).
 - Quando o gasto passa de 100%, a barra indica estouro (cor), sem bloquear nada.
 
 **US-10 - Dashboard**
 Como usuário, quero abrir o app e entender minha situação em 5 segundos.
-- Mostra: saldo total e por conta; receitas e despesas do mês corrente (cards); donut de despesas por categoria do mês; últimas 10 transações; pendências de recorrência a confirmar.
+- Mostra: saldo em contas (débito) e cartões a pagar (crédito) separados, com o detalhe de cada conta e de cada cartão (fatura atual, total a pagar, limite disponível); receitas e despesas do mês corrente (cards); donut de despesas por categoria do mês; últimas 10 transações; pendências de recorrência a confirmar.
 - Todos os números respeitam D4/D6 (derivados; transferências fora).
 
 **US-11 - Ajuste de saldo**
@@ -339,16 +342,16 @@ Datas assumem "hoje" = **15/08/2026**, avançado via `TEST_TODAY` (secao 9.5). C
 | # | Ação | Resultado esperado |
 |---|---|---|
 | 1 | Cadastrar usuário A (a@teste.com) e logar | Dashboard vazio; categorias do Apêndice A existem |
-| 2 | Criar conta "Corrente", saldo inicial R$ 1.000,00 | Saldo total: **R$ 1.000,00** |
+| 2 | Criar conta "Corrente", saldo inicial R$ 1.000,00 | Saldo em contas: **R$ 1.000,00** |
 | 3 | Criar cartão "Roxo": fecha dia 03, vence dia 10 | Saldo do cartão: R$ 0,00 |
 | 4 | Lançar despesa Mercado R$ 150,00, 14/08, Corrente | Corrente: **R$ 850,00**; donut: Mercado 100% |
-| 5 | Lançar receita Salário R$ 3.000,00, 05/08 | Saldo total: **R$ 3.850,00**; cards do mês: receitas R$ 3.000,00 / despesas R$ 150,00 |
-| 6 | Lançar no cartão "Fone" R$ 300,00 em 3x, 14/08 | 3 parcelas de R$ 100,00: 1/3 na fatura 09/2026, 2/3 na 10/2026, 3/3 na 11/2026; cartão hoje: **-R$ 100,00**; despesas de agosto: **R$ 250,00** |
+| 5 | Lançar receita Salário R$ 3.000,00, 05/08 | Saldo em contas: **R$ 3.850,00**; cards do mês: receitas R$ 3.000,00 / despesas R$ 150,00 |
+| 6 | Lançar no cartão "Fone" R$ 300,00 em 3x, 14/08 | 3 parcelas de R$ 100,00: 1/3 na fatura 09/2026, 2/3 na 10/2026, 3/3 na 11/2026; cartão: **-R$ 300,00** (cartões a pagar: R$ 300,00); despesas de agosto: **R$ 150,00** (a 1/3 conta em setembro, mês da fatura) |
 | 7 | Criar regra "Internet" R$ 120,00, mensal, dia 20, Corrente, Assinaturas | Nenhuma transação criada; 20/08 aparece como "prevista" |
 | 8 | Avançar para 21/08 e recarregar o app **duas vezes** | Exatamente **1** transação pendente de 20/08 (idempotência); saldo inalterado |
-| 9 | Confirmar a pendente | Corrente: **R$ 3.730,00**; despesas de agosto: R$ 370,00 |
+| 9 | Confirmar a pendente | Corrente: **R$ 3.730,00**; despesas de agosto: R$ 270,00 |
 | 10 | Avançar para 04/09 | Fatura 09/2026 do Roxo: **fechada**, total **R$ 100,00** |
-| 11 | Pagar fatura 09/2026 pela Corrente | Transferência de R$ 100,00 criada; fatura **paga**; Corrente: **R$ 3.630,00**; cartão: R$ 0,00; despesas de **setembro** não incluem esses R$ 100,00 |
+| 11 | Pagar fatura 09/2026 pela Corrente | Transferência de R$ 100,00 criada; fatura **paga**; Corrente: **R$ 3.630,00**; cartão: **-R$ 200,00** (restam 2/3 e 3/3); despesas de **setembro**: R$ 100,00 (a parcela 1/3; o pagamento não conta de novo) |
 | 12 | Definir orçamento Mercado R$ 600,00 e voltar a olhar agosto | Barra: R$ 150,00 de R$ 600,00 = **25%** |
 | 13 | Ajustar saldo da Corrente para R$ 3.600,00 | Despesa "Ajuste de saldo" R$ 30,00 criada; Corrente: **R$ 3.600,00** |
 | 14 | Exportar dados | CSV contém as 9 transações (com a transferência e parcelas 2/3 e 3/3 futuras), datas DD/MM/YYYY, valores com vírgula |

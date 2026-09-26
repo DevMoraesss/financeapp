@@ -25,8 +25,8 @@ internal sealed class TransactionService(
 
         if (!string.IsNullOrWhiteSpace(filter.Month))
         {
-            var (from, to) = MonthRange.Parse(filter.Month);
-            query = query.Where(transaction => transaction.Date >= from && transaction.Date <= to);
+            // Mesma regra do resumo do mes: compra no cartao aparece no mes da fatura.
+            query = query.Where(MonthRange.ReferenceFilter(filter.Month));
         }
 
         if (filter.AccountId is { } accountId)

@@ -6,7 +6,10 @@ namespace FinanceMove.Modules.Transactions.Contracts;
 /// </summary>
 public interface ITransactionsQuery
 {
-    /// <summary>Saldo de todas as contas do usuario na data informada, ja com o saldo inicial somado.</summary>
+    /// <summary>
+    /// Saldo de todas as contas do usuario na data informada, ja com o saldo inicial somado. Em
+    /// cartao, e tudo que ainda nao foi pago, inclusive parcelas futuras (fica negativo).
+    /// </summary>
     Task<IReadOnlyList<AccountBalanceDto>> GetBalancesAsync(
         Guid userId,
         DateOnly asOf,
@@ -18,7 +21,10 @@ public interface ITransactionsQuery
         DateOnly asOf,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Receitas, despesas e saldo de um mes calendario. Transferencias ficam de fora (SPEC D6).</summary>
+    /// <summary>
+    /// Receitas, despesas e saldo do mes. Despesa de cartao conta no mes da fatura; transferencias
+    /// ficam de fora (SPEC D6 e secao 5.3).
+    /// </summary>
     Task<MonthSummaryDto> GetMonthSummaryAsync(
         Guid userId,
         string month,
@@ -39,9 +45,11 @@ public interface ITransactionsQuery
         Guid accountId,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Ultimos lancamentos confirmados com data ate <paramref name="asOf"/> (sem parcela futura).</summary>
     Task<IReadOnlyList<TransactionDto>> GetRecentAsync(
         Guid userId,
         int count,
+        DateOnly asOf,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<TransactionDto>> GetPendingAsync(

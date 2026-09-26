@@ -33,6 +33,12 @@ public sealed class Account
     public short? DueDay { get; set; }
 
     /// <summary>
+    /// Limite do cartao de credito, informativo: serve para mostrar o limite disponivel. Nao e
+    /// dinheiro do usuario e por isso nunca entra em saldo nenhum. So existe em cartao.
+    /// </summary>
+    public decimal? CreditLimit { get; set; }
+
+    /// <summary>
     /// Conta arquivada some dos formularios mas continua nos relatorios. Conta que ja teve
     /// transacao nunca e excluida de verdade (modelo-de-dados secao 5.3).
     /// </summary>

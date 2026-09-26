@@ -6,6 +6,22 @@ namespace FinanceMove.Api.Endpoints;
 
 internal static class AccountEndpoints
 {
+    /// <summary>
+    /// Limite disponivel = limite menos o que ja foi comprado e nao pago (inclusive parcelas
+    /// futuras, que ja ocupam o limite no banco).
+    /// </summary>
+    private static AccountPayload ToPayload(AccountSummary account, decimal currentBalance) => new(
+        account.Id,
+        account.Name,
+        account.Type,
+        account.InitialBalance,
+        currentBalance,
+        account.ClosingDay,
+        account.DueDay,
+        account.CreditLimit,
+        account.CreditLimit is { } limit ? Money.Round(limit + Math.Min(0m, currentBalance)) : null,
+        account.Archived);
+
     public static void MapAccountEndpoints(this IEndpointRouteBuilder routes)
     {
         var group = routes.MapGroup("/api/v1/accounts").RequireAuthorization();
@@ -25,22 +41,14 @@ internal static class AccountEndpoints
             var balances = (await transactions.GetBalancesAsync(user.Id, clock.Today, cancellationToken))
                 .ToDictionary(balance => balance.AccountId, balance => balance.Balance);
 
-            var payload = list.Select(account => new
-            {
-                id = account.Id,
-                name = account.Name,
-                type = account.Type,
-                initialBalance = account.InitialBalance,
-                currentBalance = balances.GetValueOrDefault(account.Id, account.InitialBalance),
-                closingDay = account.ClosingDay,
-                dueDay = account.DueDay,
-                archived = account.Archived,
-            }).ToList();
+            var payload = list.Select(account => ToPayload(
+                account,
+                balances.GetValueOrDefault(account.Id, account.InitialBalance))).ToList();
 
             return Results.Ok(new
             {
                 accounts = payload,
-                totalBalance = Money.Round(payload.Sum(account => account.currentBalance)),
+                totalBalance = Money.Round(payload.Sum(account => account.CurrentBalance)),
             });
         });
 
@@ -72,18 +80,7 @@ internal static class AccountEndpoints
             }
 
             var balance = await transactions.GetBalanceAsync(user.Id, id, clock.Today, cancellationToken);
-
-            return Results.Ok(new
-            {
-                id = account.Id,
-                name = account.Name,
-                type = account.Type,
-                initialBalance = account.InitialBalance,
-                currentBalance = balance,
-                closingDay = account.ClosingDay,
-                dueDay = account.DueDay,
-                archived = account.Archived,
-            });
+            return Results.Ok(ToPayload(account, balance));
         });
 
         group.MapPut("/{id:guid}", async (
@@ -148,3 +145,16 @@ internal static class AccountEndpoints
 }
 
 internal sealed record AdjustBalanceRequest(decimal RealBalance);
+
+/// <summary>Conta como a API devolve. Em cartao, o saldo e a divida (negativo) e o limite e so informativo.</summary>
+internal sealed record AccountPayload(
+    Guid Id,
+    string Name,
+    AccountType Type,
+    decimal InitialBalance,
+    decimal CurrentBalance,
+    short? ClosingDay,
+    short? DueDay,
+    decimal? CreditLimit,
+    decimal? AvailableLimit,
+    bool Archived);

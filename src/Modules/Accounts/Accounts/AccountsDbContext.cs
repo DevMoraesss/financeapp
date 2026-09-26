@@ -21,16 +21,24 @@ public sealed class AccountsDbContext(DbContextOptions<AccountsDbContext> option
 
         modelBuilder.Entity<Account>(entity =>
         {
-            entity.ToTable("account", table => table.HasCheckConstraint(
-                "ck_account_card_cycle",
-                """
-                ("type" = 'credit_card'
-                   AND closing_day BETWEEN 1 AND 28
-                   AND due_day BETWEEN 1 AND 28
-                   AND closing_day <> due_day)
-                OR
-                ("type" <> 'credit_card' AND closing_day IS NULL AND due_day IS NULL)
-                """));
+            entity.ToTable("account", table =>
+            {
+                table.HasCheckConstraint(
+                    "ck_account_card_cycle",
+                    """
+                    ("type" = 'credit_card'
+                       AND closing_day BETWEEN 1 AND 28
+                       AND due_day BETWEEN 1 AND 28
+                       AND closing_day <> due_day)
+                    OR
+                    ("type" <> 'credit_card' AND closing_day IS NULL AND due_day IS NULL)
+                    """);
+
+                // Limite so existe em cartao, e nunca negativo.
+                table.HasCheckConstraint(
+                    "ck_account_credit_limit",
+                    """credit_limit IS NULL OR ("type" = 'credit_card' AND credit_limit >= 0)""");
+            });
 
             entity.HasKey(account => account.Id);
 
@@ -49,6 +57,8 @@ public sealed class AccountsDbContext(DbContextOptions<AccountsDbContext> option
             entity.Property(account => account.InitialBalance)
                   .HasColumnType("numeric(14,2)")
                   .IsRequired();
+
+            entity.Property(account => account.CreditLimit).HasColumnType("numeric(14,2)");
 
             entity.Property(account => account.Archived).HasDefaultValue(false);
             entity.Property(account => account.CreatedAt).HasDefaultValueSql("now()");

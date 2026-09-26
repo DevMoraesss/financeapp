@@ -15,4 +15,5 @@ public sealed record AccountSummary(
     decimal InitialBalance,
     short? ClosingDay,
     short? DueDay,
-    bool Archived);
+    bool Archived,
+    decimal? CreditLimit);

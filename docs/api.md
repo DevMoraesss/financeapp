@@ -161,8 +161,10 @@ do usuário à linha de log correspondente.
 
 ```jsonc
 // POST /accounts - cartão de crédito (fecha 25, vence 02 do mês seguinte)
+// initialBalance de cartão: zero ou negativo (o que já se devia). Positivo -> 422
+// card-positive-initial-balance. creditLimit só em cartão (senão 422 credit-limit-only-card).
 { "name": "Nubank", "type": "credit_card", "initialBalance": 0.00,
-  "closingDay": 25, "dueDay": 2 }
+  "closingDay": 25, "dueDay": 2, "creditLimit": 5000.00 }
 
 // 201 Created
 { "id": "0192f3b2-...", "name": "Nubank", "type": "credit_card",
@@ -172,12 +174,14 @@ do usuário à linha de log correspondente.
 
 ```jsonc
 // GET /accounts -> saldo já calculado pelo servidor (SPEC secao 5.1)
+// Em cartão, currentBalance é a dívida (inclui parcelas futuras) e o limite é só informativo.
 { "accounts": [
-    { "id": "...", "name": "Corrente", "type": "checking", "currentBalance": 3730.00, "archived": false },
-    { "id": "...", "name": "Nubank", "type": "credit_card", "currentBalance": -100.00,
-      "closingDay": 25, "dueDay": 2, "archived": false }
+    { "id": "...", "name": "Corrente", "type": "checking", "currentBalance": 3730.00,
+      "creditLimit": null, "availableLimit": null, "archived": false },
+    { "id": "...", "name": "Nubank", "type": "credit_card", "currentBalance": -300.00,
+      "closingDay": 25, "dueDay": 2, "creditLimit": 5000.00, "availableLimit": 4700.00, "archived": false }
   ],
-  "totalBalance": 3630.00 }
+  "totalBalance": 3430.00 }
 ```
 
 ```jsonc
@@ -363,9 +367,16 @@ transferências nunca entram (fluxos-usuario secao 3).
 
 ```jsonc
 // GET /dashboard?month=2026-08 - uma chamada, tudo pronto para a tela
+// Contas (débito) e cartões (crédito) vêm separados (SPEC D12).
 {
-  "totalBalance": 3630.00,
-  "accounts": [ { "id": "...", "name": "Corrente", "currentBalance": 3630.00 } ],
+  "accountsBalance": 3630.00,          // corrente + poupança + dinheiro
+  "cardsOwed": 200.00,                 // soma do que se deve nos cartões, com parcelas futuras
+  "totalBalance": 3430.00,             // accountsBalance - cardsOwed (mantido no contrato)
+  "accounts": [ { "id": "...", "name": "Corrente", "type": "checking", "currentBalance": 3630.00 } ],
+  "cards": [ { "id": "...", "name": "Roxo", "owed": 200.00, "creditLimit": 5000.00,
+               "availableLimit": 4800.00,
+               "currentStatement": { "month": "2026-10", "status": "open", "total": 100.00,
+                                     "closingDate": "2026-10-03", "dueDate": "2026-10-10", "...": "..." } } ],
   "month": { "income": 3000.00, "expenses": 370.00, "balance": 2630.00 },
   "expensesByCategory": [
     { "category": "Mercado", "color": "#F59E0B", "amount": 150.00, "percent": 40.5 }
@@ -377,6 +388,11 @@ transferências nunca entram (fluxos-usuario secao 3).
 ```
 
 Uma chamada só, deliberadamente: o dashboard do protótipo faria 5 requisições e sofreria com N+1.
+
+`month`, `expensesByCategory` e o `GET /transactions?month=` seguem a mesma regra: despesa de cartão
+conta no mês da fatura (`statementMonth`), o resto pela data. `currentStatement` é a próxima fatura a
+pagar: a fechada mais antiga ainda não paga, ou a aberta. `recentTransactions` não traz lançamento com
+data futura.
 
 ## 11. Conta do usuário e LGPD
 

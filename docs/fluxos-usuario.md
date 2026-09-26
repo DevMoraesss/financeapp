@@ -175,7 +175,7 @@ flowchart TD
    `ix_transacao_categoria ... WHERE status = 'confirmada'`.
 5. **O que entra na conta:** apenas despesas **confirmadas** com data no mês calendário. Ficam de fora
    transferências (D6 - pagar fatura não é gasto novo) e pendências de recorrência não confirmadas.
-   Despesa de cartão conta pelo **mês da compra**, não pelo do pagamento (regime de competência).
+   Despesa de cartão conta pelo **mês da fatura** (quando vence), não pela data da compra (SPEC D12).
 6. **Estouro** - passar de 100% muda a cor e o texto. Nada mais. Alerta ativo (e-mail/push ao cruzar
    80%) está registrado como v3 na SPEC; entrar agora exigiria fila e preferências de notificação.
 

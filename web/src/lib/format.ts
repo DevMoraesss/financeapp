@@ -68,6 +68,12 @@ export function todayIso(): string {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
 }
 
+/** "2026-09" -> "09/2026" (fatura identificada pelo mes em que vence). */
+export function formatStatementMonth(isoMonth: string): string {
+  const [year, month] = isoMonth.split('-')
+  return `${month}/${year}`
+}
+
 /** Rótulo do tipo de conta para a UI. */
 export function accountTypeLabel(type: string): string {
   const labels: Record<string, string> = {

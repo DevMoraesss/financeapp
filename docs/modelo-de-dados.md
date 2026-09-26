@@ -83,6 +83,7 @@ erDiagram
         numeric initial_balance "14,2 - pode ser negativo"
         smallint closing_day "nullable - so cartao, 1..28"
         smallint due_day "nullable - so cartao, 1..28"
+        numeric credit_limit "14,2 nullable - so cartao, informativo, nunca entra em saldo"
         boolean archived
         timestamptz created_at
         timestamptz updated_at
@@ -440,7 +441,19 @@ dessincronizada das compras" - mesmo princípio do saldo.
 ### 5.2 Pagamento de fatura
 
 Uma transferência `conta escolhida -> cartão`, com `statement_month = 'AAAA-MM'` preenchido. Como é
-transfer, não conta como despesa (SPEC D6) - a despesa já contou na data da compra.
+transfer, não conta como despesa (SPEC D6) - a despesa já contou no mês da fatura (SPEC D12).
+
+### 5.2.1 Mês de referência e saldo do cartão (SPEC D12, 25/09/2026)
+
+- **Mês de referência** de um lançamento: `statement_month` quando é despesa de cartão; o mês de
+  `date` em todo o resto. Resumo do mês, gráfico por categoria, orçamento e lista usam essa regra
+  (`MonthRange.ReferenceFilter`). Não precisou de coluna nova: `statement_month` já era gravado em
+  toda despesa de cartão (e agora também na recorrência lançada em cartão).
+- **Saldo do cartão** = `initial_balance` + todas as transações confirmadas do cartão, **sem** o
+  filtro `date <= today`: parcela futura já é dívida. Nas contas de débito o filtro continua.
+- `credit_limit` é informativo (limite disponível = limite + saldo, que é negativo). A migration
+  `AccountsCreditLimit` moveu para ele o `initial_balance` positivo de cartões, que era o limite
+  digitado no campo errado.
 
 ### 5.3 Arquivamento vs exclusão
 

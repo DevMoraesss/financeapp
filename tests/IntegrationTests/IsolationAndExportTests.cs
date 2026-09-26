@@ -117,7 +117,8 @@ public sealed class IsolationAndExportTests(PostgresFixture fixture)
         {
             name,
             type,
-            initialBalance = 1000.00m,
+            // Cartao comeca devendo zero: saldo inicial positivo em cartao e recusado.
+            initialBalance = type == "credit_card" ? 0m : 1000.00m,
             closingDay,
             dueDay,
         });

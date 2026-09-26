@@ -62,24 +62,39 @@ export function Settings() {
                           account.dueDay &&
                           ` - fecha dia ${account.closingDay}, vence dia ${account.dueDay}`}
                       </p>
+                      {account.type === 'credit_card' && account.availableLimit != null && (
+                        <p className="text-xs text-ink-faint">
+                          Limite disponivel {formatMoney(account.availableLimit)} de{' '}
+                          {formatMoney(account.creditLimit ?? 0)}
+                        </p>
+                      )}
                     </div>
 
                     <div className="flex shrink-0 items-center gap-2">
-                      <span
-                        className={`tabular text-sm font-medium ${
-                          account.currentBalance < 0 ? 'text-expense' : 'text-ink'
-                        }`}
-                      >
-                        {formatMoney(account.currentBalance)}
-                      </span>
+                      <div className="text-right">
+                        <span
+                          className={`tabular text-sm font-medium ${
+                            account.currentBalance < 0 ? 'text-expense' : 'text-ink'
+                          }`}
+                        >
+                          {formatMoney(account.currentBalance)}
+                        </span>
+                        {account.type === 'credit_card' && (
+                          <p className="text-xs text-ink-faint">a pagar, com parcelas futuras</p>
+                        )}
+                      </div>
 
-                      <button
-                        onClick={() => setAdjusting(account)}
-                        className="grid size-7 place-items-center rounded-lg text-ink-faint opacity-0 transition hover:text-brand group-hover:opacity-100"
-                        title="Ajustar saldo"
-                      >
-                        <Scale className="size-3.5" />
-                      </button>
+                      {/* Cartao nao tem "saldo real do banco" para ajustar: a divida vem das compras
+                          e dos pagamentos de fatura. Ajustar criaria uma despesa que nao existiu. */}
+                      {account.type !== 'credit_card' && (
+                        <button
+                          onClick={() => setAdjusting(account)}
+                          className="grid size-7 place-items-center rounded-lg text-ink-faint opacity-0 transition hover:text-brand group-hover:opacity-100"
+                          title="Ajustar saldo"
+                        >
+                          <Scale className="size-3.5" />
+                        </button>
+                      )}
 
                       <button
                         onClick={async () => {
@@ -143,6 +158,7 @@ function NewAccountModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
   const [name, setName] = useState('')
   const [type, setType] = useState<AccountType>('checking')
   const [initialBalance, setInitialBalance] = useState('0,00')
+  const [creditLimit, setCreditLimit] = useState('')
   const [closingDay, setClosingDay] = useState(25)
   const [dueDay, setDueDay] = useState(2)
   const [error, setError] = useState<string | null>(null)
@@ -159,9 +175,12 @@ function NewAccountModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
       await endpoints.createAccount({
         name,
         type,
-        initialBalance: Number(initialBalance.trim().replace(/\./g, '').replace(',', '.')) || 0,
+        // Cartao comeca devendo zero: a divida nasce das compras que voce lancar. O limite vai em
+        // campo proprio e nunca vira saldo (era o que inflava o saldo total).
+        initialBalance: isCard ? 0 : parseBrl(initialBalance) ?? 0,
         closingDay: isCard ? closingDay : null,
         dueDay: isCard ? dueDay : null,
+        creditLimit: isCard ? parseBrl(creditLimit) : null,
       })
 
       onSaved()
@@ -200,17 +219,32 @@ function NewAccountModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
           </select>
         </Field>
 
-        <Field
-          label="Saldo inicial"
-          hint="Quanto voce tem nesta conta hoje. O saldo atual e sempre calculado a partir daqui."
-        >
-          <input
-            className={inputClass}
-            inputMode="decimal"
-            value={initialBalance}
-            onChange={(event) => setInitialBalance(event.target.value)}
-          />
-        </Field>
+        {isCard ? (
+          <Field
+            label="Limite do cartao (opcional)"
+            hint="So para mostrar o limite disponivel. Nao e dinheiro seu e nao entra em saldo nenhum."
+          >
+            <input
+              className={inputClass}
+              inputMode="decimal"
+              placeholder="5.000,00"
+              value={creditLimit}
+              onChange={(event) => setCreditLimit(event.target.value)}
+            />
+          </Field>
+        ) : (
+          <Field
+            label="Saldo inicial"
+            hint="Quanto voce tem nesta conta antes dos lancamentos que vai registrar. O saldo atual e calculado a partir daqui."
+          >
+            <input
+              className={inputClass}
+              inputMode="decimal"
+              value={initialBalance}
+              onChange={(event) => setInitialBalance(event.target.value)}
+            />
+          </Field>
+        )}
 
         {isCard && (
           <div className="grid grid-cols-2 gap-3">
@@ -436,4 +470,12 @@ function DataSection() {
       )}
     </>
   )
+}
+
+/** "1.234,56" -> 1234.56; vazio ou invalido -> null. So converte o texto digitado, nao faz conta. */
+function parseBrl(input: string): number | null {
+  const trimmed = input.trim()
+  if (trimmed === '') return null
+  const value = Number(trimmed.replace(/\./g, '').replace(',', '.'))
+  return Number.isFinite(value) ? value : null
 }

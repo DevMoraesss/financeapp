@@ -3,7 +3,7 @@ import { Plus, Search, Trash2 } from 'lucide-react'
 import { Button, Card, EmptyState, ErrorState, Loading, StatCard, inputClass } from '../components/ui'
 import { TransactionModal } from '../components/TransactionModal'
 import { endpoints } from '../lib/api'
-import { formatDate, formatMoney, formatMonth, formatSigned } from '../lib/format'
+import { formatDate, formatMoney, formatMonth, formatSigned, formatStatementMonth } from '../lib/format'
 import { useApi } from '../lib/useApi'
 import { useMonth } from '../lib/MonthContext'
 
@@ -98,7 +98,7 @@ export function Transactions() {
                       <p className="text-xs text-ink-faint">
                         {transaction.category?.name ?? 'Transferencia'} - {transaction.account.name}
                         {transaction.destinationAccount && ` para ${transaction.destinationAccount.name}`}
-                        {transaction.statementMonth && ` - fatura ${transaction.statementMonth}`}
+                        {transaction.statementMonth && ` - fatura ${formatStatementMonth(transaction.statementMonth)}`}
                       </p>
                     </div>
 
